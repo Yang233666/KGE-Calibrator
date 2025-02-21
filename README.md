@@ -1,2 +1,2 @@
 # KGE-Calibrator
-This is the KGE calibrator
+This is the code of KGE calibrator. 
