@@ -25,25 +25,21 @@ def parse_args(args=None):
 		usage='train.py [<args>] [-h | --help]'
 	)
 
+	# These are hyperparameters of knowledge graph embedding models, not KGE Calibrator's.
 	parser.add_argument('--cuda', action='store_true', help='use GPU', default=True)
 	parser.add_argument('--cuda_device', action='store_true', help='use GPU', default="cuda")
-	# parser.add_argument('--do_train', action='store_true', default=True)
-	parser.add_argument('--do_train', action='store_true', default=False)
+	parser.add_argument('--do_train', action='store_true', default=True)
 	parser.add_argument('--do_valid', action='store_true', default=True)
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
-
 	parser.add_argument('--data_path', type=str, default='../data/wn18')
 	parser.add_argument('-save', '--save_path', default='../models/ComplEx_wn18', type=str)
 	parser.add_argument('-init', '--init_checkpoint', default='../models/ComplEx_wn18', type=str)
-	parser.add_argument('-test_log_name', '--test_log_name', default='ONLY-TEST.log', type=str)
-
 	parser.add_argument('--model', default='ComplEx', type=str)
 	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=True)
 	parser.add_argument('-dr', '--double_relation_embedding', action='store_true', default=True)
 	parser.add_argument('-adv', '--negative_adversarial_sampling', action='store_true', default=True)
-
 	parser.add_argument('-b', '--batch_size', default=1024, type=int)
 	parser.add_argument('-n', '--negative_sample_size', default=256, type=int)
 	parser.add_argument('-d', '--hidden_dim', default=1000, type=int)
@@ -53,7 +49,6 @@ def parse_args(args=None):
 	parser.add_argument('--max_steps', default=150000, type=int)
 	parser.add_argument('--test_batch_size', default=16, type=int, help='test batch size')
 	parser.add_argument('-r', '--regularization', default=0.000002, type=float)
-
 	parser.add_argument('--save_checkpoint_steps', default=10000, type=int)
 	parser.add_argument('--valid_steps', default=10000, type=int)
 	parser.add_argument('--log_steps', default=100, type=int, help='train log every xx steps')
@@ -65,6 +60,13 @@ def parse_args(args=None):
 	parser.add_argument('--warm_up_steps', default=None, type=int)
 	parser.add_argument('--nentity', type=int, default=0, help='DO NOT MANUALLY SET')
 	parser.add_argument('--nrelation', type=int, default=0, help='DO NOT MANUALLY SET')
+	# These are hyperparameters of knowledge graph embedding models, not KGE Calibrator's.
+
+	# These are hyperparameters of KGE Calibrator.
+	parser.add_argument('--KGEC_num_bins', default=10, type=int)
+	parser.add_argument('--KGEC_learning_rate', default=0.01, type=float)
+	parser.add_argument('--KGEC_initial_temperature', default=1.0, type=float)
+	# These are hyperparameters of KGE Calibrator.
 
 	return parser.parse_args(args)
 
@@ -135,8 +137,7 @@ def set_logger(args):
 	if args.do_train:
 		log_file = os.path.join(args.save_path or args.init_checkpoint, 'train.log')
 	else:
-		# log_file = os.path.join(args.save_path or args.init_checkpoint, 'test.log')
-		log_file = os.path.join(args.save_path or args.init_checkpoint, args.test_log_name)
+		log_file = os.path.join(args.save_path or args.init_checkpoint, 'test.log')
 
 	logging.basicConfig(
 		format='%(asctime)s %(levelname)-8s %(message)s',
@@ -161,12 +162,12 @@ def log_metrics(mode, step, metrics):
 
 def main(args):
 	if (not args.do_train) and (not args.do_valid) and (not args.do_test):
-		raise ValueError('one of train/val/test mode must be choosed.')
+		raise ValueError('one of train/val/test mode must be chosen.')
 
 	if args.init_checkpoint:
 		override_config(args)
 	elif args.data_path is None:
-		raise ValueError('one of init_checkpoint/data_path must be choosed.')
+		raise ValueError('one of init_checkpoint/data_path must be chosen.')
 
 	if args.do_train and args.save_path is None:
 		raise ValueError('Where do you want to save your trained model?')
@@ -195,6 +196,7 @@ def main(args):
 	args.nentity = nentity
 	args.nrelation = nrelation
 
+	logging.info('These are hyperparameters of knowledge graph embedding models, not for the KGE Calibrator. ')
 	logging.info('Model: %s' % args.model)
 	logging.info('Data Path: %s' % args.data_path)
 	logging.info('#entity: %d' % nentity)
@@ -338,16 +340,20 @@ def main(args):
 
 	gc.collect()  # Run garbage collection
 	torch.cuda.empty_cache()  # Clear cache
+	logging.info('Now, the knowledge graph embedding model training is finished! ')
 
-	calibration_models_list.append(KGEC_plus)
-
+	logging.info('We can start to train the KGE Calibrator!  ')
+	calibration_models_list.append(
+		KGEC(num_bins=args.KGEC_num_bins, init_temp=args.KGEC_initial_temperature, lr=args.KGEC_learning_rate))
 	logging.info('Train on Valid Dataset...')
 	metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args, calibration_models_list, True)
 	log_metrics('Valid: ', step, metrics)
+	logging.info('Now, the KGE Calibrator training is finished! ')
 
 	logging.info('Predict on Test Dataset...')
 	test_original_metrics, test_calibrate_metrics = (
 		kge_model.calibration_predict(kge_model, test_triples, all_true_triples, args, calibration_models_list))
+	logging.info('Now, the KGE Calibrator Prediction is finished! ')
 	log_metrics('Test Before Calibration: ', step, test_original_metrics)
 	log_metrics('Test After Calibration: ', step, test_calibrate_metrics)
 

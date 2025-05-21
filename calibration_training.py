@@ -424,6 +424,8 @@ class KGEModel(nn.Module):
         gc.collect()
         torch.cuda.empty_cache()
 
+        logging.info('KGE Calibrator training start.')
+        # Jump Selection Strategy
         from scipy.stats import entropy
         # Compute softmax and sort scores
         all_model_score = all_model_score.softmax(-1).cpu()
@@ -437,11 +439,12 @@ class KGEModel(nn.Module):
 
         # Find maximum jump information
         arg_max_jump = kl_divergences.argmax()
-        print("Arg Max Jump:", arg_max_jump)
+        # Jump Selection Strategy
 
         if calibrate:
             for calibration_model in calibration_models_list:
-                calibration_model.fit(all_model_score, all_positive_arg)
+                calibration_model.fit(all_model_score, all_positive_arg, jump_index=arg_max_jump)
+        logging.info('KGE Calibrator training finished.')
 
         metrics = {metric: sum(values) / len(values) for metric, values in metrics_dict.items()}
 
@@ -488,7 +491,7 @@ class KGEModel(nn.Module):
         metrics_dict = {calibration_model.name: {} for calibration_model in calibration_models_list}
 
         # Define metrics
-        metric_calibration = ['ECE', 'AECE', 'NLL']
+        metric_calibration = ['ECE', 'ACE', 'NLL']
         metric_kge = ['MRR', 'MR', 'HITS@1', 'HITS@3', 'HITS@10']
 
         # Initialize dictionaries for each calibration model
@@ -497,7 +500,7 @@ class KGEModel(nn.Module):
 
         metrics_after = {calibration_model.name: {
             'ECE': CalibrationError(task="multiclass", num_classes=args.nentity),
-            'AECE': AdaptiveCalibrationError(task="multiclass", num_classes=args.nentity),
+            'ACE': AdaptiveCalibrationError(task="multiclass", num_classes=args.nentity),
             'NLL': CategoricalNLL()
         } for calibration_model in calibration_models_list}
 
@@ -541,11 +544,7 @@ class KGEModel(nn.Module):
 
                         # Update post-calibration metrics
                         for metric_name, metric_fn in metrics_after[calibration_model.name].items():
-                            if metric_name == 'Entropy':
-                                metric_fn.update(probs_after)  # Only pass `probs_before` for Entropy
-                            else:
-                                metric_fn.update(probs_after,
-                                                 target)  # Pass both `probs_before` and `target` for other metrics
+                            metric_fn.update(probs_after, target)
 
                         # do not print metric_kge
                         for i in range(batch_size):
@@ -571,7 +570,7 @@ class KGEModel(nn.Module):
         # Inject calibration error metrics after scaling
         for model_name in metrics_after:
             calibrate_metrics[f'{model_name}_ECE'] = metrics_after[model_name]['ECE'].compute().item()
-            calibrate_metrics[f'{model_name}_AECE'] = metrics_after[model_name]['AECE'].compute().item()
+            calibrate_metrics[f'{model_name}_ACE'] = metrics_after[model_name]['ACE'].compute().item()
             calibrate_metrics[f'{model_name}_NLL'] = metrics_after[model_name]['NLL'].compute().item()
 
         return original_metrics, calibrate_metrics
