@@ -443,7 +443,10 @@ class KGEModel(nn.Module):
 
         if calibrate:
             for calibration_model in calibration_models_list:
-                calibration_model.fit(all_model_score, all_positive_arg, jump_index=arg_max_jump)
+                if calibration_model.name == "KGEC":
+                    calibration_model.fit(all_model_score, all_positive_arg, jump_index=arg_max_jump)
+                else:
+                    calibration_model.fit(all_model_score, all_positive_arg)
         logging.info('KGE Calibrator training finished.')
 
         metrics = {metric: sum(values) / len(values) for metric, values in metrics_dict.items()}

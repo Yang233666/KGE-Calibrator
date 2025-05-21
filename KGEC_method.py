@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 import torch
 from torch import Tensor, nn
 from abc import ABC, abstractmethod
@@ -51,7 +51,7 @@ class KGEC(nn.Module):
 			bin_edges: Optional[Tensor] = None,
 			lr: float = 0.01,
 			init_temp: float = 1.0,
-			device: Optional[Literal["cpu", "cuda"] | torch.device] = None,
+			device: Optional[Union[Literal["cpu", "cuda"], torch.device]] = None,
 	):
 		super().__init__()
 		self.num_bins = num_bins
