@@ -27,8 +27,7 @@ def parse_args(args=None):
 	# These are hyperparameters of knowledge graph embedding models, not KGE Calibrator's.
 	parser.add_argument('--cuda', action='store_true', help='use GPU', default=True)
 	parser.add_argument('--cuda_device', action='store_true', help='use GPU', default="cuda")
-	# parser.add_argument('--do_train', action='store_true', default=True)
-	parser.add_argument('--do_train', action='store_true', default=False)
+	parser.add_argument('--do_train', action='store_true', default=True)
 	parser.add_argument('--do_valid', action='store_true', default=True)
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
