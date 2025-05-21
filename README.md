@@ -12,7 +12,7 @@ To address this, **KGEC** introduces:
 
 Comprehensive experiments across multiple KGE models and benchmark datasets demonstrate that KGEC consistently **outperforms existing calibration baselines** in both **effectiveness and efficiency**, establishing a strong and efficient foundation for trustworthy knowledge graph completion. 
 
-### 🔍 Contributions
+### 🧠 Contributions
 
 - ✅ We evaluate nine widely used post-processing calibration methods and identify four that are unsuitable for entity prediction due to their poor performance and adverse impact on ranking-based metrics.
 - ✅ We propose **KGEC**, the first probability calibration method specifically designed for KGE models, which addresses the challenge of large-scale class space while preserving original link prediction rankings.
