@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 
 from calibration_training import KGEModel
 from dataloader import TrainDataset, BidirectionalOneShotIterator
-from KGEC_methods import *
+from KGEC_method import *
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
@@ -24,31 +24,31 @@ def parse_args(args=None):
 		description='Training and Testing Knowledge Graph Embedding Models',
 		usage='train.py [<args>] [-h | --help]'
 	)
+
 	# These are hyperparameters of knowledge graph embedding models, not KGE Calibrator's.
 	parser.add_argument('--cuda', action='store_true', help='use GPU', default=True)
 	parser.add_argument('--cuda_device', action='store_true', help='use GPU', default="cuda")
-	# parser.add_argument('--do_train', action='store_true', default=True)
-	parser.add_argument('--do_train', action='store_true', default=False)
+	parser.add_argument('--do_train', action='store_true', default=True)
 	parser.add_argument('--do_valid', action='store_true', default=True)
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
 	parser.add_argument('--data_path', type=str, default='../data/wn18')
-	parser.add_argument('-save', '--save_path', default='../models/DistMult_wn18', type=str)
-	parser.add_argument('-init', '--init_checkpoint', default='../models/DistMult_wn18', type=str)
-	parser.add_argument('--model', default='DistMult', type=str)
+	parser.add_argument('-save', '--save_path', default='../models/TransE_wn18', type=str)
+	parser.add_argument('-init', '--init_checkpoint', default='../models/TransE_wn18', type=str)
+	parser.add_argument('--model', default='TransE', type=str)
 	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=False)
 	parser.add_argument('-dr', '--double_relation_embedding', action='store_true', default=False)
 	parser.add_argument('-adv', '--negative_adversarial_sampling', action='store_true', default=True)
-	parser.add_argument('-b', '--batch_size', default=512, type=int)
-	parser.add_argument('-n', '--negative_sample_size', default=1024, type=int)
+	parser.add_argument('-b', '--batch_size', default=1024, type=int)
+	parser.add_argument('-n', '--negative_sample_size', default=256, type=int)
 	parser.add_argument('-d', '--hidden_dim', default=1000, type=int)
-	parser.add_argument('-g', '--gamma', default=200.0, type=float)
+	parser.add_argument('-g', '--gamma', default=24.0, type=float)
 	parser.add_argument('-a', '--adversarial_temperature', default=1.0, type=float)
-	parser.add_argument('-lr', '--learning_rate', default=0.001, type=float)
-	parser.add_argument('--max_steps', default=80000, type=int)
-	parser.add_argument('--test_batch_size', default=8, type=int, help='test batch size')
-	parser.add_argument('-r', '--regularization', default=0.00001, type=float)
+	parser.add_argument('-lr', '--learning_rate', default=0.0001, type=float)
+	parser.add_argument('--max_steps', default=150000, type=int)
+	parser.add_argument('--test_batch_size', default=16, type=int, help='test batch size')
+	parser.add_argument('-r', '--regularization', default=0.0, type=float)
 	parser.add_argument('--save_checkpoint_steps', default=10000, type=int)
 	parser.add_argument('--valid_steps', default=10000, type=int)
 	parser.add_argument('--log_steps', default=100, type=int, help='train log every xx steps')
@@ -232,6 +232,7 @@ def main(args):
 		kge_model = kge_model.to(torch.device(args.cuda_device))
 	else:
 		logging.info('CUDA is not available. ')
+		kge_model = kge_model.to(torch.device('cpu'))
 
 	if args.do_train:
 		# Set training dataloader iterator
@@ -267,7 +268,10 @@ def main(args):
 	if args.init_checkpoint:
 		# Restore model from checkpoint directory
 		logging.info('Loading checkpoint %s...' % args.init_checkpoint)
-		checkpoint = torch.load(os.path.join(args.init_checkpoint, 'checkpoint'))
+		if args.cuda:
+			checkpoint = torch.load(os.path.join(args.init_checkpoint, 'checkpoint'))
+		else:
+			checkpoint = torch.load(os.path.join(args.init_checkpoint, 'checkpoint'), map_location='cpu')
 		init_step = checkpoint['step']
 		kge_model.load_state_dict(checkpoint['model_state_dict'])
 		if args.do_train:
@@ -279,7 +283,6 @@ def main(args):
 		init_step = 0
 
 	step = init_step
-
 	logging.info('Start Training...')
 	logging.info('init_step = %d' % init_step)
 	logging.info('batch_size = %d' % args.batch_size)

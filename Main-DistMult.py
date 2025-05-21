@@ -15,9 +15,9 @@ from torch.utils.data import DataLoader
 
 from calibration_training import KGEModel
 from dataloader import TrainDataset, BidirectionalOneShotIterator
-from KGEC_methods import *
+from KGEC_method import *
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 def parse_args(args=None):
 	parser = argparse.ArgumentParser(
@@ -34,22 +34,21 @@ def parse_args(args=None):
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
 	parser.add_argument('--data_path', type=str, default='../data/wn18')
-	parser.add_argument('-save', '--save_path', default='../models/RotatE_wn18', type=str)
-	parser.add_argument('-init', '--init_checkpoint', default='../models/RotatE_wn18', type=str)
-	parser.add_argument('-test_log_name', '--test_log_name', default='ONLY-TEST.log', type=str)
-	parser.add_argument('--model', default='RotatE', type=str)
-	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=True)
+	parser.add_argument('-save', '--save_path', default='../models/DistMult_wn18', type=str)
+	parser.add_argument('-init', '--init_checkpoint', default='../models/DistMult_wn18', type=str)
+	parser.add_argument('--model', default='DistMult', type=str)
+	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=False)
 	parser.add_argument('-dr', '--double_relation_embedding', action='store_true', default=False)
 	parser.add_argument('-adv', '--negative_adversarial_sampling', action='store_true', default=True)
 	parser.add_argument('-b', '--batch_size', default=512, type=int)
 	parser.add_argument('-n', '--negative_sample_size', default=1024, type=int)
-	parser.add_argument('-d', '--hidden_dim', default=500, type=int)
-	parser.add_argument('-g', '--gamma', default=6.0, type=float)
-	parser.add_argument('-a', '--adversarial_temperature', default=0.5, type=float)
-	parser.add_argument('-lr', '--learning_rate', default=0.00005, type=float)
+	parser.add_argument('-d', '--hidden_dim', default=1000, type=int)
+	parser.add_argument('-g', '--gamma', default=200.0, type=float)
+	parser.add_argument('-a', '--adversarial_temperature', default=1.0, type=float)
+	parser.add_argument('-lr', '--learning_rate', default=0.001, type=float)
 	parser.add_argument('--max_steps', default=80000, type=int)
 	parser.add_argument('--test_batch_size', default=8, type=int, help='test batch size')
-	parser.add_argument('-r', '--regularization', default=0.0, type=float)
+	parser.add_argument('-r', '--regularization', default=0.00001, type=float)
 	parser.add_argument('--save_checkpoint_steps', default=10000, type=int)
 	parser.add_argument('--valid_steps', default=10000, type=int)
 	parser.add_argument('--log_steps', default=100, type=int, help='train log every xx steps')
@@ -163,12 +162,12 @@ def log_metrics(mode, step, metrics):
 
 def main(args):
 	if (not args.do_train) and (not args.do_valid) and (not args.do_test):
-		raise ValueError('one of train/val/test mode must be choosed.')
+		raise ValueError('one of train/val/test mode must be chosen.')
 
 	if args.init_checkpoint:
 		override_config(args)
 	elif args.data_path is None:
-		raise ValueError('one of init_checkpoint/data_path must be choosed.')
+		raise ValueError('one of init_checkpoint/data_path must be chosen.')
 
 	if args.do_train and args.save_path is None:
 		raise ValueError('Where do you want to save your trained model?')
