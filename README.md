@@ -22,7 +22,7 @@ Comprehensive experiments across multiple KGE models and benchmark datasets demo
 
 ## 🔍 Overview
 
-We support the following KGE models:
+You can evaluate KGEC with the following KGE models:
 
 * **TransE** (`Main-Transe.py`)
 * **ComplEx** (`Main-ComplEx.py`)
