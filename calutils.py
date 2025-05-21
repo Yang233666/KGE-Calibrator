@@ -10,18 +10,12 @@ import numpy as np
 def checkFile(filename):
     return pathlib.Path(filename).is_file()
 
-def expit_probs_x(x: torch.Tensor, np_ndarray=False, sigmoid_or_softmax='softmax'):
+def expit_probs_x(x: torch.Tensor, np_ndarray=False):
     if np_ndarray:
         x = np.array(x.cpu())
-        if sigmoid_or_softmax == 'sigmoid':
-            x = expit(x)
-        else:
-            x = softmax(x)
+        x = softmax(x)
     else:
-        if sigmoid_or_softmax == 'sigmoid':
-            x = x.sigmoid().cpu()
-        else:
-            x = x.softmax(-1).cpu()
+        x = x.softmax(-1).cpu()
     return x
 
 def expit_probs_binary(x: torch.Tensor, y: torch.Tensor):
@@ -51,3 +45,11 @@ def normalize(tensor, eps=1e-10):
 
     # Divide the tensor by its sum to normalize
     return tensor / tensor_sum
+
+def convert_to_tensor(a):
+    if isinstance(a, np.ndarray):
+        return torch.tensor(a)
+    elif isinstance(a, torch.Tensor):
+        return a
+    else:
+        raise TypeError("Input must be a numpy.ndarray or torch.Tensor.")

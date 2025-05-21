@@ -346,6 +346,7 @@ def main(args):
 	logging.info('Now, the knowledge graph embedding model training is finished! ')
 
 	logging.info('We can start to train the KGE Calibrator!  ')
+	calibration_models_list.append(UncalCalibrator())  # This is the result before applying the KGE Calibrator.
 	calibration_models_list.append(
 		KGEC(num_bins=args.KGEC_num_bins, init_temp=args.KGEC_initial_temperature, lr=args.KGEC_learning_rate))
 	logging.info('Train on Valid Dataset...')

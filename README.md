@@ -1,6 +1,22 @@
-# Knowledge Graph Embedding Calibrator (KGEC)
+# KGE Calibrator: An Efficient Probability Calibration Method of Knowledge Graph Embedding Models for Trustworthy Link Prediction
 
-This repository provides a framework for training and calibrating Knowledge Graph Embedding (KGE) models using a novel **KGEC** calibrator. The core objective is to improve the confidence estimation of KGE models, enabling more reliable reasoning in downstream applications.
+This repository provides the official implementation of KGE Calibrator (KGEC), a novel and efficient probability calibration method explicitly designed for Knowledge Graph Embedding (KGE) models. KGEC aims to enhance the trustworthiness of link prediction by providing well-calibrated probability estimates while preserving the original ranking performance.
+
+While KGE models are widely used for link prediction, they often generate poorly calibrated probabilities, leading to unreliable predictions. Existing calibration methods are not well-suited to the unique challenges of KGE—especially its massive class spaces, tiny per-class probabilities and ranking-centric evaluation. 
+
+To address this, **KGEC** introduces:
+
+- 🔹 **A jump selection strategy** to **enhance training efficiency** by identifying and focusing on the most informative instances while discarding less significant ones, making the method scalable to large class spaces. 
+- 🔹 **A multi-binning scaling mechanism** to **increase model expressiveness** by learning separate temperature scales for different probability levels, which better captures the ranking-sensitive behavior of KGE predictions.
+- 🔹 **A Wasserstein distance-based loss** to **improve calibration quality** through distribution-aware, smooth optimization. This is the first application of Wasserstein distance in probability calibration. 
+
+Comprehensive experiments across multiple KGE models and benchmark datasets demonstrate that KGEC consistently **outperforms existing calibration baselines** in both **effectiveness and efficiency**, establishing a strong and efficient foundation for trustworthy knowledge graph completion. 
+
+### 🔍 Contributions
+
+- ✅ We evaluate nine widely used post-processing calibration methods and identify four that are unsuitable for entity prediction due to their poor performance and adverse impact on ranking-based metrics.
+- ✅ We propose **KGEC**, the first probability calibration method specifically designed for KGE models, which addresses the challenge of large-scale class space while preserving original link prediction rankings.
+- ✅ We conduct a thorough experimental study on four benchmark datasets, demonstrating that KGEC **consistently outperforms** existing calibration methods in terms of both **effectiveness and efficiency**.
 
 ---
 
@@ -13,7 +29,7 @@ We support the following KGE models:
 * **DistMult** (`Main-DistMult.py`)
 * **RotatE** (`Main-RotatE.py`)
 
-After training, a post-hoc calibrator called **KGEC** is applied, which combines temperature-scaled binning and Sinkhorn divergence for calibration.
+After training the KGE model, KGEC is applied as a post-hoc calibrator to improve the trustworthiness and reliability of the link prediction results by producing better-calibrated probability estimates. 
 
 ---
 
@@ -25,11 +41,12 @@ After training, a post-hoc calibrator called **KGEC** is applied, which combines
 ├── Main-ComplEx.py         # Main script for ComplEx
 ├── Main-DistMult.py        # Main script for DistMult
 ├── Main-RotatE.py          # Main script for RotatE
-├── KGEC_method.py          # Main implementation of KGEC calibrator
+├── KGEC_method.py          # Core implementation of KGE Calibrator
 ├── calibration_training.py # KGE model training and evaluation logic
-├── dataloader.py           # Custom dataset and iterator logic
+├── dataloader.py           # Dataset handling and loaders
 ├── calutils.py             # Helper functions for calibration
 ├── requirements.txt        # Python dependencies
+├── Figures/                # Contains plots (e.g., Ablation_Study_plot.png, case1.jpg, case2.jpg)
 ```
 
 ---
@@ -46,7 +63,7 @@ pip install -r requirements.txt
 
 ## 🏃‍♂️ Running the Code
 
-To train a KGE model and calibrate it with KGEC:
+To train a KGE model, such as TransE, and calibrate it with KGEC:
 
 ```bash
 python Main-Transe.py
@@ -74,24 +91,48 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | ---------------------------- | ---------------------------------------------------------- |
 | `--data_path`                | Path to the dataset (e.g., `../data/wn18`)                 |
 | `--model`                    | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`) |
-| `--KGEC_num_bins`            | Number of bins for the calibrator (default: 10)            |
-| `--KGEC_learning_rate`       | Learning rate for KGEC (default: 0.01)                     |
-| `--KGEC_initial_temperature` | Initial bin temperature (default: 1.0)                     |
+| `--KGEC_num_bins`            | Number of bins of KGEC (default: 10)            |
+| `--KGEC_learning_rate`       | Learning rate of KGEC (default: 0.01)                     |
+| `--KGEC_initial_temperature` | Initial bin temperature of KGEC (default: 1.0)                     |
 
 ---
 
+## 🔧 Configuration Details
+
+Most of the arguments in scripts like `Main-TransE.py` are used to configure and train the underlying **Knowledge Graph Embedding (KGE) model**, such as TransE, ComplEx, DistMult, or RotatE.
+
+To apply KGEC, we must first **train the KGE model to obtain entity and relation embeddings**, which are then used as input for the calibration step.
+
+### 🔹 KGEC-Specific Hyperparameters
+
+Only the following arguments configure the KGEC calibration process:
+
+- `--KGEC_num_bins`  
+  *Number of bins used in the multi-binning scaling module.*  
+
+- `--KGEC_learning_rate`  
+  *Learning rate for optimizing KGEC parameters.*  
+
+- `--KGEC_initial_temperature`  
+  *Initial temperature value for multi-bin specific temperature scaling.*  
+
+These should be tuned only if you wish to adjust the behavior of the calibration process itself. The rest of the arguments are inherited from the base KGE training configuration.
+
+---
 ## 📊 Experiment Results
 
-### Calibration Performance (Lower = Better)
+See the full set of calibration performance, efficiency, ablation study, and case study in the following sections:
 
-<table>
-<tr><td><img src="Ablation_Study_plot.pdf" alt="Ablation Study" width="700px"></td></tr>
-<tr><td align="center"><em>Figure: Ablation study of KGEC components across five evaluation metrics: ECE, ACE, NLL, training time (seconds), and memory usage (MB).</em></td></tr>
-</table>
+- `📉 Expected Calibration Error (ECE)`  
+- `📉 Adaptive Calibration Error (ACE)`  
+- `📉 Negative Log-Likelihood (NLL)`  
+- `⏱️ Training Time (seconds)`  
+- `💾 Memory Usage (MB)`  
+- `📊 Ablation Study`  
+- `🔍 Case Study`  
 
----
-
-### 📊 Expected Calibration Error (ECE)
+### 📉 Expected Calibration Error (ECE)
+Lower values indicate better calibration performance.
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -113,8 +154,10 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | RotatE (FB15K-237)   | 0.224        | 0.235            | 0.239  | 0.223                | 0.365| **0.094** |
 | **Average**          | 0.457        | 0.483            | 0.498  | 0.475                | 0.397| **0.388** |
 
+---
 
-### 📊 Adaptive Calibration Error (ACE)
+### 📉 Adaptive Calibration Error (ACE)
+Lower values indicate better calibration performance.
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -136,8 +179,10 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | RotatE (FB15K-237)   | 0.224        | 0.235            | 0.224  | 0.222                | 0.363| **0.063** |
 | **Average**          | 0.455        | 0.483            | 0.455  | 0.636                | 0.394| **0.348** |
 
+---
 
 ### 📉 Negative Log-Likelihood (NLL)
+Lower values indicate better calibration performance.
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -159,8 +204,10 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | RotatE (FB15K-237)   | 5.750        | 6.271            | nan    | 5.617                | /    | **2.743** |
 | **Average**          | 5.828        | 6.874            | 6.495  | 5.969                | 6.990| **3.396** |
 
+---
 
 ### ⏱️ Training Time (Seconds) 
+Lower values indicate higher efficiency. 
 
 | Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS     | **KGEC** |
 |----------------------|------------------|--------|----------------------|---------|----------|
@@ -182,8 +229,10 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | RotatE (FB15K-237)   | 20522.725        | 3.277  | 6.345                | 5853.287| **4.003** |
 | **Average**          | 40856.945        | 7.577  | 8.649                | 7035.177| **4.716** |
 
+---
 
 ### 💾 Memory Usage (MB) 
+Lower values indicate higher efficiency. 
 
 | Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS       | **KGEC** |
 |----------------------|------------------|--------|----------------------|-----------|----------|
@@ -205,29 +254,44 @@ python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
 | RotatE (FB15K-237)   | 1948.371         | 80.941 | 1944.730             | 8659.395  | **16.930** |
 | **Average**          | 2542.715         | 83.294 | 2540.274             | 8410.493  | **21.665** |
 
-All evaluations are conducted using CPU only for fair comparison.
+---
+
+### 📊 Ablation study (Lower = Better)
+Lower values indicate better calibration performance and higher efficiency.
+
+<table>
+<tr><td><img src="Figures/Ablation_Study_plot.png" alt="Ablation Study" width="700px"></td></tr>
+<tr><td align="center"><em>Figure: Ablation study of KGEC components across five evaluation metrics: ECE, ACE, NLL, training time (seconds), and memory usage (MB). In this figure, loss is the Wasserstein Loss, MBS means Multi-Binning Scaling, and JSS refers to Jump Selection Strategy.</em></td></tr>
+</table>
+
+---
+
+### 🔍 Case study
+
+<table>
+<tr><td><img src="Figures/case1.jpg" alt="Case Study" width="700px"></td></tr>
+<tr><td align="center"><em>Figure: Case 1 from the WN18RR dataset using the TransE model.</em></td></tr>
+</table>
+
+<table>
+<tr><td><img src="Figures/case2.jpg" alt="Case Study" width="700px"></td></tr>
+<tr><td align="center"><em>Figure: Case 2 from the WN18RR dataset using the TransE model.</em></td></tr>
+</table>
+
+---
+
+Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
 
 ## 📂 Outputs
 
-* `train.log` and `test.log` contain verbose logs
-* Learned embeddings saved as `.npy` files
-* Calibration scores (before and after) are logged clearly
+* `train.log` and `test.log` contain detailed training and evaluation verbose logs
+* Learned embeddings saved as `.npy` files (such as entity_embedding.npy, relation_embedding.npy)
+* Both ranking performance and calibration performance — before and after applying KGEC — are clearly logged
 
 ---
 
-## 💡 Citation
-
-If you use this codebase, please cite our paper (coming soon).
+## Happy Calibrating! 🚀
 
 ---
-
-## 🧠 Acknowledgements
-
-This repository builds upon classic KGE implementations and adds post-hoc calibration innovations.
-
----
-
-
-Happy Calibrating! 🚀

@@ -1,10 +1,47 @@
 from typing import Literal, Optional
 import torch
 from torch import Tensor, nn
-from .calutils import expit_probs_x, expit_probs_binary
+from abc import ABC, abstractmethod
+from .calutils import expit_probs_x, expit_probs_binary, convert_to_tensor
 import torch.optim as optim
 
 Only_Use_CPU = True
+
+
+class PostProcessing(ABC):
+	def __init__(self):
+		super().__init__()
+		self.trained = False
+		name: str
+
+	def set_model(self) -> None:
+		raise NotImplementedError
+
+	@abstractmethod
+	def fit(self, logits: Tensor, labels: Tensor) -> None:
+		raise NotImplementedError
+
+	@abstractmethod
+	def predict(
+			self,
+			x: Tensor,
+	) -> Tensor:
+		raise NotImplementedError
+
+
+class UncalCalibrator(PostProcessing):
+	def __init__(self):
+		super().__init__()
+		self.name = 'Uncalibrated'
+
+	def fit(self, uncal_probs, y_true):
+		calibrated_probs = expit_probs_x(uncal_probs, np_ndarray=False)
+		pass
+
+	def predict(self, uncal_probs):
+		calibrated_probs = expit_probs_x(uncal_probs, np_ndarray=False)
+		calibrated_probs = convert_to_tensor(calibrated_probs)
+		return calibrated_probs
 
 
 class KGEC(nn.Module):
