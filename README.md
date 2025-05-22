@@ -278,8 +278,6 @@ Lower values indicate better calibration performance and higher efficiency.
 <tr><td align="center"><em>Figure: Case 2 from the WN18RR dataset using the TransE model.</em></td></tr>
 </table>
 
----
-
 Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
