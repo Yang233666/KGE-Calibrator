@@ -9,15 +9,16 @@ Knowledge Graph Embedding (KGE) models are great at predicting links, but they a
 
 ## Our Solution: KGE Calibrator (KGEC)
 
-**KGEC** is a post-processing method designed specifically to solve this. It's both **effective** and **highly efficient**.
+**KGEC** is a post-processing method designed specifically to solve this. It's both **effective and highly efficient**.
 
-**Key Features**
+### Key Features
 
-- ⚡️ **Efficient Training**: A **jump selection strategy** smartly focuses on the most informative training samples, making KGEC scalable to massive knowledge graphs where other methods fail.
+  - **⚡️ Efficient Training:** A **jump selection strategy** smartly focuses on the most informative training samples, making KGEC scalable to massive knowledge graphs where other methods fail.
+  
+  - **✨ Expressive Modeling:** A **multi-binning scaling** mechanism learns different "temperature" values for different confidence levels, accurately correcting both high and low model scores.
+  
+  - **💧 Robust Optimization:** A **Wasserstein distance-based loss** function enables smooth, distribution-aware optimization, achieving superior calibration. This is the first time this loss has been used for probability calibration.
 
-- ✨ **Expressive Modeling**: A **multi-binning scaling** mechanism learns different "temperature" values for different confidence levels, accurately correcting both high and low model confidence scores.
-
-- 💧 **Robust Optimization**: A **Wasserstein distance-based loss** function enables smooth, distribution-aware optimization, achieving superior calibration. This is the first time this loss has been used for probability calibration.
 
 ---
 
@@ -120,7 +121,10 @@ Only the following arguments configure the KGEC calibration process:
 These should be tuned only if you wish to adjust the behavior of the calibration process itself. The rest of the arguments are inherited from the base KGE training configuration.
 
 ---
-## 📊 Experiment Results
+
+## 📊 Experiment Results: Better, Faster, and Lighter
+
+KGEC consistently **outperforms all baselines** across four datasets and four different KGE models. It achieves the best average scores in calibration (ECE, ACE, NLL), training time, and memory usage. 
 
 See the full set of calibration performance, efficiency, ablation study, and case study in the following sections:
 
@@ -132,8 +136,7 @@ See the full set of calibration performance, efficiency, ablation study, and cas
 - `📊 Ablation Study`  
 - `🔍 Case Study`  
 
-### 📉 Expected Calibration Error (ECE)
-Lower values indicate better calibration performance.
+### 📉 Expected Calibration Error (ECE) - Lower is Better
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -157,8 +160,7 @@ Lower values indicate better calibration performance.
 
 ---
 
-### 📉 Adaptive Calibration Error (ACE)
-Lower values indicate better calibration performance.
+### 📉 Adaptive Calibration Error (ACE) - Lower is Better
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -182,8 +184,7 @@ Lower values indicate better calibration performance.
 
 ---
 
-### 📉 Negative Log-Likelihood (NLL)
-Lower values indicate better calibration performance.
+### 📉 Negative Log-Likelihood (NLL) - Lower is Better
 
 | Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS  | **KGEC** |
 |----------------------|--------------|------------------|--------|----------------------|------|----------|
@@ -207,8 +208,7 @@ Lower values indicate better calibration performance.
 
 ---
 
-### ⏱️ Training Time (Seconds) 
-Lower values indicate higher efficiency. 
+### ⏱️ Training Time (Seconds) - Lower is Better
 
 | Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS     | **KGEC** |
 |----------------------|------------------|--------|----------------------|---------|----------|
@@ -232,8 +232,7 @@ Lower values indicate higher efficiency.
 
 ---
 
-### 💾 Memory Usage (MB) 
-Lower values indicate higher efficiency. 
+### 💾 Memory Usage (MB) - Lower is Better
 
 | Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS       | **KGEC** |
 |----------------------|------------------|--------|----------------------|-----------|----------|
@@ -256,6 +255,10 @@ Lower values indicate higher efficiency.
 | **Average**          | 2542.715         | 83.294 | 2540.274             | 8410.493  | **21.665** |
 
 ---
+
+## 🔍 Visual Analysis: How and Why KGEC Works
+
+Our case studies show KGEC's practical benefits, while the ablation study confirms that each component of our design is critical for its success.
 
 ### 📊 Ablation study (Lower = Better)
 Lower values indicate better calibration performance and higher efficiency.
@@ -295,38 +298,6 @@ Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
 
------
-
-# KGE Calibrator: Trustworthy Link Prediction by Calibrating Knowledge Graph Embeddings
-
-\<div align="center"\>
-
-[](https://www.google.com/search?q=https://link_to_your_paper.com)
-[](https://www.google.com/search?q=https://link_to_your_hf_space.com)
-[](https://www.python.org/downloads/release/python-3100/)
-[](https://opensource.org/licenses/MIT)
-
-\</div\>
-
-This repository provides the official implementation of **KGE Calibrator (KGEC)**, a novel probability calibration method from our EMNLP 2025 paper. KGEC makes link prediction in Knowledge Graphs more trustworthy by producing well-calibrated probabilities without hurting ranking performance.
-
-> **Above:** A GIF showing an uncalibrated model making an overconfident incorrect prediction, contrasted with KGEC providing a more realistic, well-calibrated probability. *(This is a placeholder—creating a visual like this is highly recommended\!)*
-
------
-
-## The Problem: KGE Models are Confident but Wrong
-
-Knowledge Graph Embedding (KGE) models are great at predicting links, but they are often **poorly calibrated**. This means their confidence scores don't match the true likelihood of a prediction being correct, making them unreliable for real-world applications where trust is crucial. Existing calibration methods fail on KGs due to the massive number of potential answers (entities) and the focus on ranking over true probability.
-
-## Our Solution: KGE Calibrator (KGEC)
-
-**KGEC** is a post-processing method designed specifically to solve this. It's both **effective and highly efficient**.
-
-### Key Features
-
-  - **⚡️ Efficient Training:** A **jump selection strategy** smartly focuses on the most informative training samples, making KGEC scalable to massive knowledge graphs where other methods fail.
-  - **✨ Expressive Modeling:** A **multi-binning scaling** mechanism learns different "temperature" values for different confidence levels, accurately correcting both high and low model scores.
-  - **💧 Robust Optimization:** A **Wasserstein distance-based loss** function enables smooth, distribution-aware optimization, achieving superior calibration. This is the first time this loss has been used for probability calibration.
 
 -----
 
@@ -334,64 +305,6 @@ Knowledge Graph Embedding (KGE) models are great at predicting links, but they a
 
 KGEC consistently **outperforms all baselines** across four datasets and four different KGE models. It achieves the best average scores in calibration (ECE, ACE, NLL), training time, and memory usage.
 
-\<details\>
-\<summary\>\<b\>Click to see detailed performance tables\</b\>\</summary\>
-
-### 📉 Expected Calibration Error (ECE) - Lower is Better
-
-| Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS   | **KGEC** |
-|----------------------|--------------|------------------|----------------|---------------------|-------|-------------------|
-| **Average** | 0.457        | 0.483            | 0.498          | 0.475               | 0.397 | **0.388** |
-
-### 📉 Adaptive Calibration Error (ACE) - Lower is Better
-
-| Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS   | **KGEC** |
-|----------------------|--------------|------------------|----------------|---------------------|-------|-------------------|
-| **Average** | 0.455        | 0.483            | 0.455          | 0.636               | 0.394 | **0.348** |
-
-### 📉 Negative Log-Likelihood (NLL) - Lower is Better
-
-| Dataset / Model      | Uncalibrated | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS   | **KGEC** |
-|----------------------|--------------|------------------|----------------|---------------------|-------|-------------------|
-| **Average** | 5.828        | 6.874            | 6.495          | 5.969               | 6.990 | **3.396** |
-
-### ⏱️ Training Time (Seconds) - Lower is Better
-
-| Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS      | **KGEC** |
-|----------------------|------------------|----------------|---------------------|----------|-------------------|
-| **Average** | 40856.945        | 7.577          | 8.649               | 7035.177 | **4.716** |
-
-### 💾 Memory Usage (MB) - Lower is Better
-
-| Dataset / Model      | Platt Calibrator | Vector Scaling | Temperature Scaling | PTS      | **KGEC** |
-|----------------------|------------------|----------------|---------------------|----------|-------------------|
-| **Average** | 2542.715         | 83.294         | 2540.274            | 8410.493 | **21.665** |
-
-\</details\>
-
------
-
-## 🔍 Visual Analysis: How and Why KGEC Works
-
-Our case studies show KGEC's practical benefits, while the ablation study confirms that each component of our design is critical for its success.
-
-\<table\>
-\<tr\>
-\<td align="center"\>\<b\>Case Study: From Overconfidence to Reliability\</b\>\</td\>
-\<td align="center"\>\<b\>Ablation Study: Every Part Matters\</b\>\</td\>
-\</tr\>
-\<tr\>
-\<td\>\<img src="Figures/case1.jpg" alt="Case Study 1" width="100%"\>\</td\>
-\<td rowspan="2"\>\<img src="Figures/Ablation\_Study\_plot.png" alt="Ablation Study" width="100%"\>\</td\>
-\</tr\>
-\<tr\>
-\<td\>\<img src="Figures/case2.jpg" alt="Case Study 2" width="100%"\>\</td\>
-\</tr\>
-\<tr\>
-\<td align="center"\>\<em\>KGEC corrects the overconfident predictions of the base TransE model, assigning more reasonable probabilities.\</em\>\</td\>
-\<td align="center"\>\<em\>Removing any component (Wasserstein Loss, Multi-Binning, or Jump Selection) degrades performance.\</em\>\</td\>
-\</tr\>
-\</table\>
 
 -----
 
