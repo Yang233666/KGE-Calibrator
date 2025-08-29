@@ -200,7 +200,7 @@ pip install -r requirements.txt
 
 You can evaluate KGEC with the following KGE models:
 
-* **TransE** (`Main-Transe.py`)
+* **TransE** (`Main-TransE.py`)
 * **ComplEx** (`Main-ComplEx.py`)
 * **DistMult** (`Main-DistMult.py`)
 * **RotatE** (`Main-RotatE.py`)
@@ -228,7 +228,7 @@ python Main-RotatE.py
 To adjust hyperparameters, pass them as command-line arguments:
 
 ```bash
-python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --KGEC_num_bins 15
+python Main-TransE.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --KGEC_num_bins 15
 ```
 
 
