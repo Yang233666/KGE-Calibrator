@@ -214,7 +214,7 @@ To train a KGE model (e.g., TransE) and then calibrate it with KGEC, simply run 
 
 ```bash
 # Train TransE and calibrate with KGEC on the default dataset
-python Main-Transe.py
+python Main-TransE.py
 ```
 
 You can easily switch to other KGE models:
