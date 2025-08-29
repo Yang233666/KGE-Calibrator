@@ -195,6 +195,7 @@ cd KGE-Calibrator
 pip install -r requirements.txt
 ```
 
+
 ### 2\. 🔍 Overview
 
 You can evaluate KGEC with the following KGE models:
@@ -230,10 +231,8 @@ To adjust hyperparameters, pass them as command-line arguments:
 python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --KGEC_num_bins 15
 ```
 
-\<details\>
-\<summary\>\<b\>Click for Advanced Configuration & Project Structure\</b\>\</summary\>
 
-### Key Arguments
+### 4\.🔧 Key Arguments
 
 | Argument                 | Description                                                  | Default |
 |--------------------------|--------------------------------------------------------------|---------|
@@ -245,7 +244,8 @@ python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --
 
 *Note: Most arguments in the scripts configure the base KGE model. The arguments prefixed with `--KGEC_` are specific to our calibrator.*
 
-### 🗂 Project Structure
+
+### 5\. 🗂 Project Structure
 
 ```bash
 .
@@ -257,157 +257,15 @@ python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --
 └── requirements.txt        # Python dependencies
 ```
 
----
 
-## ⚙️ Installation
-
-Make sure Python 3.10.12 is installed. Then run:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 🏃‍♂️ Running the Code
-
-To train a KGE model, such as TransE, and calibrate it with KGEC:
-
-```bash
-python Main-Transe.py
-```
-
-To try other KGE models:
-
-```bash
-python Main-ComplEx.py
-python Main-DistMult.py
-python Main-RotatE.py
-```
-
-You can adjust training or calibration parameters:
-
-```bash
-python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
-```
-
----
-
-## 🔧 Key Arguments
-
-| Argument                     | Description                                                |
-| ---------------------------- | ---------------------------------------------------------- |
-| `--data_path`                | Path to the dataset (e.g., `../data/wn18`)                 |
-| `--model`                    | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`) |
-| `--KGEC_num_bins`            | Number of bins of KGEC (default: 10)            |
-| `--KGEC_learning_rate`       | Learning rate of KGEC (default: 0.01)                     |
-| `--KGEC_initial_temperature` | Initial bin temperature of KGEC (default: 1.0)                     |
-
----
-
-## 🔧 Configuration Details
-
-Most of the arguments in scripts like `Main-TransE.py` are used to configure and train the underlying **Knowledge Graph Embedding (KGE) model**, such as TransE, ComplEx, DistMult, or RotatE.
-
-To apply KGEC, we must first **train the KGE model to obtain entity and relation embeddings**, which are then used as input for the calibration step.
-
-### 🔹 KGEC-Specific Hyperparameters
-
-Only the following arguments configure the KGEC calibration process:
-
-- `--KGEC_num_bins`  
-  *Number of bins used in the multi-binning scaling module.*  
-
-- `--KGEC_learning_rate`  
-  *Learning rate for optimizing KGEC parameters.*  
-
-- `--KGEC_initial_temperature`  
-  *Initial temperature value for multi-bin specific temperature scaling.*  
-
-These should be tuned only if you wish to adjust the behavior of the calibration process itself. The rest of the arguments are inherited from the base KGE training configuration.
-
----
-
-
-
-## 📂 Outputs
+### 6\. 📂 Outputs
 
 * `train.log` and `test.log` contain detailed training and evaluation verbose logs
 * Learned embeddings saved as `.npy` files (such as `entity_embedding.npy`, `relation_embedding.npy`)
 * Both ranking performance and calibration performance — before and after applying KGEC — are clearly logged
 
----
-
-## Happy Calibrating! 🚀
 
 ---
-
-
-## 🚀 Getting Started
-
-### 1\. Installation
-
-This project is built with Python 3.10. First, clone the repository and install the dependencies:
-
-```bash
-git clone https://github.com/your-username/kge-calibrator.git
-cd kge-calibrator
-pip install -r requirements.txt
-```
-
-### 2\. Running the Code
-
-To train a KGE model (e.g., TransE) and then calibrate it with KGEC, simply run the main script:
-
-```bash
-# Train TransE and calibrate with KGEC on the default dataset
-python Main-Transe.py
-```
-
-You can easily switch to other KGE models:
-
-```bash
-python Main-ComplEx.py
-python Main-DistMult.py
-python Main-RotatE.py
-```
-
-To adjust hyperparameters, pass them as command-line arguments:
-
-```bash
-python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --KGEC_num_bins 15
-```
-
-\<details\>
-\<summary\>\<b\>Click for Advanced Configuration & Project Structure\</b\>\</summary\>
-
-### Key Arguments
-
-| Argument                 | Description                                                  | Default |
-|--------------------------|--------------------------------------------------------------|---------|
-| `--data_path`            | Path to the dataset (e.g., `../data/wn18`)                   | `../data/wn18` |
-| `--model`                | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`)   | `TransE` |
-| `--KGEC_num_bins`        | Number of bins for KGEC's multi-binning mechanism            | 10      |
-| `--KGEC_learning_rate`   | Learning rate for the KGEC optimizer                         | 0.01    |
-| `--KGEC_initial_temperature` | Initial temperature for all bins in KGEC                 | 1.0     |
-
-*Note: Most arguments in the scripts configure the base KGE model. The arguments prefixed with `--KGEC_` are specific to our calibrator.*
-
-### Project Structure
-
-```bash
-.
-├── Main-*.py              # Main scripts for each KGE model
-├── KGEC_method.py          # Core implementation of KGE Calibrator
-├── calibration_training.py # KGE model training and evaluation logic
-├── dataloader.py           # Data loading utilities
-├── calutils.py             # Helper functions for calibration
-└── requirements.txt        # Python dependencies
-```
-
-\</details\>
-
------
 
 ## 📜 Citing Our Work
 
@@ -422,4 +280,6 @@ If you find KGEC useful in your research, please consider citing our paper:
 }
 ```
 
-Happy Calibrating\! 🚀
+---
+
+## Happy Calibrating\! 🚀
