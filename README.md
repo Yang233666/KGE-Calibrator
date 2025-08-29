@@ -274,7 +274,7 @@ If you find KGEC useful in your research, please consider citing our paper:
 ```bibtex
 @inproceedings{yang2025kgec,
   title={{KGE Calibrator: An Efficient Probability Calibration Method of Knowledge Graph Embedding Models for Trustworthy Link Prediction}},
-  author={Yang Yang and Edward Curry},
+  author={Yang Yang and Mohan Timilsina and Edward Curry},
   booktitle={Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
   year={2025}
 }
