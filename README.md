@@ -19,107 +19,6 @@ Knowledge Graph Embedding (KGE) models are great at predicting links, but they a
   
   - **💧 Robust Optimization:** A **Wasserstein distance-based loss** function enables smooth, distribution-aware optimization, achieving superior calibration. This is the first time this loss has been used for probability calibration.
 
-
----
-
-## 🔍 Overview
-
-You can evaluate KGEC with the following KGE models:
-
-* **TransE** (`Main-Transe.py`)
-* **ComplEx** (`Main-ComplEx.py`)
-* **DistMult** (`Main-DistMult.py`)
-* **RotatE** (`Main-RotatE.py`)
-
-After training the KGE model, KGEC is applied as a post-hoc calibrator to improve the trustworthiness and reliability of the link prediction results by producing better-calibrated probability estimates. 
-
----
-
-## 🗂 Project Structure
-
-```bash
-.
-├── Main-Transe.py          # Main script for TransE
-├── Main-ComplEx.py         # Main script for ComplEx
-├── Main-DistMult.py        # Main script for DistMult
-├── Main-RotatE.py          # Main script for RotatE
-├── KGEC_method.py          # Core implementation of KGE Calibrator
-├── calibration_training.py # KGE model training and evaluation logic
-├── dataloader.py           # Dataset handling and loaders
-├── calutils.py             # Helper functions for calibration
-├── requirements.txt        # Python dependencies
-├── Figures/                # Contains plots (e.g., Ablation_Study_plot.png, case1.jpg, case2.jpg)
-```
-
----
-
-## ⚙️ Installation
-
-Make sure Python 3.10.12 is installed. Then run:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 🏃‍♂️ Running the Code
-
-To train a KGE model, such as TransE, and calibrate it with KGEC:
-
-```bash
-python Main-Transe.py
-```
-
-To try other KGE models:
-
-```bash
-python Main-ComplEx.py
-python Main-DistMult.py
-python Main-RotatE.py
-```
-
-You can adjust training or calibration parameters:
-
-```bash
-python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
-```
-
----
-
-## 🔧 Key Arguments
-
-| Argument                     | Description                                                |
-| ---------------------------- | ---------------------------------------------------------- |
-| `--data_path`                | Path to the dataset (e.g., `../data/wn18`)                 |
-| `--model`                    | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`) |
-| `--KGEC_num_bins`            | Number of bins of KGEC (default: 10)            |
-| `--KGEC_learning_rate`       | Learning rate of KGEC (default: 0.01)                     |
-| `--KGEC_initial_temperature` | Initial bin temperature of KGEC (default: 1.0)                     |
-
----
-
-## 🔧 Configuration Details
-
-Most of the arguments in scripts like `Main-TransE.py` are used to configure and train the underlying **Knowledge Graph Embedding (KGE) model**, such as TransE, ComplEx, DistMult, or RotatE.
-
-To apply KGEC, we must first **train the KGE model to obtain entity and relation embeddings**, which are then used as input for the calibration step.
-
-### 🔹 KGEC-Specific Hyperparameters
-
-Only the following arguments configure the KGEC calibration process:
-
-- `--KGEC_num_bins`  
-  *Number of bins used in the multi-binning scaling module.*  
-
-- `--KGEC_learning_rate`  
-  *Learning rate for optimizing KGEC parameters.*  
-
-- `--KGEC_initial_temperature`  
-  *Initial temperature value for multi-bin specific temperature scaling.*  
-
-These should be tuned only if you wish to adjust the behavior of the calibration process itself. The rest of the arguments are inherited from the base KGE training configuration.
-
 ---
 
 ## 📊 Experiment Results: Better, Faster, and Lighter
@@ -268,8 +167,6 @@ Lower values indicate better calibration performance and higher efficiency.
 <tr><td align="center"><em>Figure: Ablation study of KGEC components across five evaluation metrics: ECE, ACE, NLL, training time (seconds), and memory usage (MB). In this figure, loss is the Wasserstein Loss, MBS means Multi-Binning Scaling, and JSS refers to Jump Selection Strategy.</em></td></tr>
 </table>
 
----
-
 ### 🔍 Case study
 
 <table>
@@ -286,6 +183,109 @@ Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
 
+
+## 🔍 Overview
+
+You can evaluate KGEC with the following KGE models:
+
+* **TransE** (`Main-Transe.py`)
+* **ComplEx** (`Main-ComplEx.py`)
+* **DistMult** (`Main-DistMult.py`)
+* **RotatE** (`Main-RotatE.py`)
+
+After training the KGE model, KGEC is applied as a post-hoc calibrator to improve the trustworthiness and reliability of the link prediction results by producing better-calibrated probability estimates. 
+
+---
+
+## 🗂 Project Structure
+
+```bash
+.
+├── Main-Transe.py          # Main script for TransE
+├── Main-ComplEx.py         # Main script for ComplEx
+├── Main-DistMult.py        # Main script for DistMult
+├── Main-RotatE.py          # Main script for RotatE
+├── KGEC_method.py          # Core implementation of KGE Calibrator
+├── calibration_training.py # KGE model training and evaluation logic
+├── dataloader.py           # Dataset handling and loaders
+├── calutils.py             # Helper functions for calibration
+├── requirements.txt        # Python dependencies
+├── Figures/                # Contains plots (e.g., Ablation_Study_plot.png, case1.jpg, case2.jpg)
+```
+
+---
+
+## ⚙️ Installation
+
+Make sure Python 3.10.12 is installed. Then run:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 🏃‍♂️ Running the Code
+
+To train a KGE model, such as TransE, and calibrate it with KGEC:
+
+```bash
+python Main-Transe.py
+```
+
+To try other KGE models:
+
+```bash
+python Main-ComplEx.py
+python Main-DistMult.py
+python Main-RotatE.py
+```
+
+You can adjust training or calibration parameters:
+
+```bash
+python Main-Transe.py --KGEC_learning_rate 0.01 --KGEC_num_bins 10
+```
+
+---
+
+## 🔧 Key Arguments
+
+| Argument                     | Description                                                |
+| ---------------------------- | ---------------------------------------------------------- |
+| `--data_path`                | Path to the dataset (e.g., `../data/wn18`)                 |
+| `--model`                    | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`) |
+| `--KGEC_num_bins`            | Number of bins of KGEC (default: 10)            |
+| `--KGEC_learning_rate`       | Learning rate of KGEC (default: 0.01)                     |
+| `--KGEC_initial_temperature` | Initial bin temperature of KGEC (default: 1.0)                     |
+
+---
+
+## 🔧 Configuration Details
+
+Most of the arguments in scripts like `Main-TransE.py` are used to configure and train the underlying **Knowledge Graph Embedding (KGE) model**, such as TransE, ComplEx, DistMult, or RotatE.
+
+To apply KGEC, we must first **train the KGE model to obtain entity and relation embeddings**, which are then used as input for the calibration step.
+
+### 🔹 KGEC-Specific Hyperparameters
+
+Only the following arguments configure the KGEC calibration process:
+
+- `--KGEC_num_bins`  
+  *Number of bins used in the multi-binning scaling module.*  
+
+- `--KGEC_learning_rate`  
+  *Learning rate for optimizing KGEC parameters.*  
+
+- `--KGEC_initial_temperature`  
+  *Initial temperature value for multi-bin specific temperature scaling.*  
+
+These should be tuned only if you wish to adjust the behavior of the calibration process itself. The rest of the arguments are inherited from the base KGE training configuration.
+
+---
+
+
+
 ## 📂 Outputs
 
 * `train.log` and `test.log` contain detailed training and evaluation verbose logs
@@ -298,15 +298,6 @@ Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
 
-
------
-
-## 📊 Results: Better, Faster, and Lighter
-
-KGEC consistently **outperforms all baselines** across four datasets and four different KGE models. It achieves the best average scores in calibration (ECE, ACE, NLL), training time, and memory usage.
-
-
------
 
 ## 🚀 Getting Started
 
@@ -379,9 +370,9 @@ python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --
 If you find KGEC useful in your research, please consider citing our paper:
 
 ```bibtex
-@inproceedings{yourname2025kgec,
+@inproceedings{yang2025kgec,
   title={{KGE Calibrator: An Efficient Probability Calibration Method of Knowledge Graph Embedding Models for Trustworthy Link Prediction}},
-  author={Your Name and Co-author Names},
+  author={Yang Yang and Edward Curry},
   booktitle={Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
   year={2025}
 }
