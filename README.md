@@ -1,16 +1,23 @@
 # KGE Calibrator: An Efficient Probability Calibration Method of Knowledge Graph Embedding Models for Trustworthy Link Prediction
 
-This repository provides the official implementation of KGE Calibrator (KGEC), a novel and efficient probability calibration method explicitly designed for Knowledge Graph Embedding (KGE) models. KGEC aims to enhance the trustworthiness of link prediction by providing well-calibrated probability estimates while preserving the original ranking performance.
+This repository provides the official implementation of **KGE Calibrator (KGEC)**, a novel and efficient probability calibration method from our EMNLP 2025 paper. KGEC makes link prediction in Knowledge Graphs more trustworthy by producing well-calibrated probabilities without hurting ranking performance. 
 
-While KGE models are widely used for link prediction, they often generate poorly calibrated probabilities, leading to unreliable predictions. Existing calibration methods are not well-suited to the unique challenges of KGE—especially its massive class spaces, tiny per-class probabilities and ranking-centric evaluation. 
+---
+### The Problem: KGE Models are Confident but Wrong
 
-To address this, **KGEC** introduces:
+Knowledge Graph Embedding (KGE) models are great at predicting links, but they are often **poorly calibrated**. This means their confidence scores don't match the true likelihood of a prediction being correct, making them unreliable for real-world applications where trust is crucial. Existing calibration methods fail on KGs due to the massive number of potential answers (entities) and the focus on ranking over true probability.
 
-- 🔹 **A jump selection strategy** to **enhance training efficiency** by identifying and focusing on the most informative instances while discarding less significant ones, making the method scalable to large class spaces. 
-- 🔹 **A multi-binning scaling mechanism** to **increase model expressiveness** by learning separate temperature scales for different probability levels, which better captures the ranking-sensitive behavior of KGE predictions.
-- 🔹 **A Wasserstein distance-based loss** to **improve calibration quality** through distribution-aware, smooth optimization. This is the first application of Wasserstein distance in probability calibration. 
+### Our Solution: KGE Calibrator (KGEC)
 
-Comprehensive experiments across multiple KGE models and benchmark datasets demonstrate that KGEC consistently **outperforms existing calibration baselines** in both **effectiveness and efficiency**, establishing a strong and efficient foundation for trustworthy knowledge graph completion. 
+**KGEC** is a post-processing method designed specifically to solve this. It's both **effective** and **highly efficient**.
+
+**Key Features**
+
+- ⚡️ **Efficient Training**: A **jump selection strategy** smartly focuses on the most informative training samples, making KGEC scalable to massive knowledge graphs where other methods fail.
+
+- ✨ **Expressive Modeling**: A **multi-binning scaling** mechanism learns different "temperature" values for different confidence levels, accurately correcting both high and low model confidence scores.
+
+- 💧 **Robust Optimization**: A **Wasserstein distance-based loss** function enables smooth, distribution-aware optimization, achieving superior calibration. This is the first time this loss has been used for probability calibration.
 
 ### 🧠 Contributions
 
