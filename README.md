@@ -183,8 +183,19 @@ Note: All evaluations are conducted using CPU only for fair comparison.
 
 ---
 
+## 🚀 Getting Started
 
-## 🔍 Overview
+### 1\. ⚙️ Installation
+
+This project is built with Python 3.10. First, clone the repository and install the dependencies:
+
+```bash
+git clone https://github.com/Yang233666/KGE-Calibrator.git
+cd KGE-Calibrator
+pip install -r requirements.txt
+```
+
+### 2\. 🔍 Overview
 
 You can evaluate KGEC with the following KGE models:
 
@@ -195,22 +206,55 @@ You can evaluate KGEC with the following KGE models:
 
 After training the KGE model, KGEC is applied as a post-hoc calibrator to improve the trustworthiness and reliability of the link prediction results by producing better-calibrated probability estimates. 
 
----
 
-## 🗂 Project Structure
+### 3\. 🏃‍♂️ Running the Code
+
+To train a KGE model (e.g., TransE) and then calibrate it with KGEC, simply run the main script:
+
+```bash
+# Train TransE and calibrate with KGEC on the default dataset
+python Main-Transe.py
+```
+
+You can easily switch to other KGE models:
+
+```bash
+python Main-ComplEx.py
+python Main-DistMult.py
+python Main-RotatE.py
+```
+
+To adjust hyperparameters, pass them as command-line arguments:
+
+```bash
+python Main-Transe.py --data_path ../data/fb15k-237 --KGEC_learning_rate 0.01 --KGEC_num_bins 15
+```
+
+\<details\>
+\<summary\>\<b\>Click for Advanced Configuration & Project Structure\</b\>\</summary\>
+
+### Key Arguments
+
+| Argument                 | Description                                                  | Default |
+|--------------------------|--------------------------------------------------------------|---------|
+| `--data_path`            | Path to the dataset (e.g., `../data/wn18`)                   | `../data/wn18` |
+| `--model`                | KGE model type (`TransE`, `ComplEx`, `DistMult`, `RotatE`)   | `TransE` |
+| `--KGEC_num_bins`        | Number of bins for KGEC's multi-binning mechanism            | 10      |
+| `--KGEC_learning_rate`   | Learning rate for the KGEC optimizer                         | 0.01    |
+| `--KGEC_initial_temperature` | Initial temperature for all bins in KGEC                 | 1.0     |
+
+*Note: Most arguments in the scripts configure the base KGE model. The arguments prefixed with `--KGEC_` are specific to our calibrator.*
+
+### 🗂 Project Structure
 
 ```bash
 .
-├── Main-Transe.py          # Main script for TransE
-├── Main-ComplEx.py         # Main script for ComplEx
-├── Main-DistMult.py        # Main script for DistMult
-├── Main-RotatE.py          # Main script for RotatE
+├── Main-*.py              # Main scripts for each KGE model
 ├── KGEC_method.py          # Core implementation of KGE Calibrator
 ├── calibration_training.py # KGE model training and evaluation logic
-├── dataloader.py           # Dataset handling and loaders
+├── dataloader.py           # Data loading utilities
 ├── calutils.py             # Helper functions for calibration
-├── requirements.txt        # Python dependencies
-├── Figures/                # Contains plots (e.g., Ablation_Study_plot.png, case1.jpg, case2.jpg)
+└── requirements.txt        # Python dependencies
 ```
 
 ---
