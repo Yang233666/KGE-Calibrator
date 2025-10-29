@@ -9,7 +9,6 @@ import logging
 import pickle
 import os
 import gc
-from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -34,24 +33,9 @@ def parse_args(args=None):
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
-	parser.add_argument(
-		'--data_path',
-		type=str,
-		default=None,
-		help='Path to the dataset directory containing entities.dict, relations.dict, etc.'
-	)
-	parser.add_argument(
-		'-save', '--save_path',
-		default=None,
-		type=str,
-		help='Directory to store checkpoints and embeddings.'
-	)
-	parser.add_argument(
-		'-init', '--init_checkpoint',
-		default=None,
-		type=str,
-		help='Path to an existing checkpoint directory to resume from.'
-	)
+	parser.add_argument('--data_path', type=str, default='../data/wn18')
+	parser.add_argument('-save', '--save_path', default='../models/TransE_wn18', type=str)
+	parser.add_argument('-init', '--init_checkpoint', default='../models/TransE_wn18', type=str)
 	parser.add_argument('--model', default='TransE', type=str)
 	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=False)
 	parser.add_argument('-dr', '--double_relation_embedding', action='store_true', default=False)
@@ -84,32 +68,7 @@ def parse_args(args=None):
 	parser.add_argument('--KGEC_initial_temperature', default=1.0, type=float)
 	# These are hyperparameters of KGE Calibrator.
 
-	args_namespace = parser.parse_args(args)
-
-	script_dir = Path(__file__).resolve().parent
-
-	if not args_namespace.data_path:
-		env_data_path = os.environ.get('KGE_DEFAULT_DATA_PATH')
-		legacy_data_path = (script_dir / '../data/wn18').resolve()
-		if env_data_path and os.path.isdir(env_data_path):
-			args_namespace.data_path = env_data_path
-		elif legacy_data_path.is_dir():
-			args_namespace.data_path = str(legacy_data_path)
-
-	if not args_namespace.save_path:
-		env_save_path = os.environ.get('KGE_DEFAULT_SAVE_PATH')
-		if env_save_path:
-			args_namespace.save_path = env_save_path
-
-	if not args_namespace.init_checkpoint:
-		env_init_checkpoint = os.environ.get('KGE_DEFAULT_INIT_CHECKPOINT')
-		legacy_init_checkpoint = (script_dir / '../models/TransE_wn18').resolve()
-		if env_init_checkpoint and os.path.isdir(env_init_checkpoint):
-			args_namespace.init_checkpoint = env_init_checkpoint
-		elif legacy_init_checkpoint.is_dir():
-			args_namespace.init_checkpoint = str(legacy_init_checkpoint)
-
-	return args_namespace
+	return parser.parse_args(args)
 
 def override_config(args):
 	'''
