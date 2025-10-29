@@ -1,336 +1,524 @@
-"""Streamlit demo for KGE Calibrator paper."""
+"""Streamlit interface for running the original KGEC pipeline.
+
+This app intentionally mirrors the command-line scripts distributed with the
+repository. The goal is to expose the same configuration options and produce
+identical calibration metrics to the original implementations (e.g.
+``Main-RotatE.py``). Only this file has been modified so that the Streamlit
+demo faithfully executes the upstream training and calibration routine.
+"""
+
 from __future__ import annotations
 
+import gc
+import importlib.util
+import io
+import logging
+import os
+import sys
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, MutableMapping
 
-import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import torch
 
+from dataloader import BidirectionalOneShotIterator, TrainDataset
+from KGEC_method import KGEC, UncalCalibrator
+
+
+# ---------------------------------------------------------------------------
+# Streamlit configuration
+# ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="KGE Calibrator Demo", layout="wide")
 
 
-def _load_numpy(upload) -> Optional[np.ndarray]:
-    """Safely load a numpy file from an upload."""
-    if upload is None:
-        return None
+# ---------------------------------------------------------------------------
+# Utilities for loading the original main scripts dynamically
+# ---------------------------------------------------------------------------
 
-    upload.seek(0)
-    data = np.load(upload, allow_pickle=False)
-
-    # ``np.load`` with allow_pickle=False returns an ``NpzFile`` when the
-    # file contains multiple arrays. We keep the behaviour but fall back to
-    # the first array for convenience.
-    if isinstance(data, np.lib.npyio.NpzFile):
-        first_key = list(data.files)[0]
-        return data[first_key]
-    return data
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
-def _read_probabilities(upload) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-    """Extract probabilities and optional labels from a CSV upload.
-
-    The function supports flexible schemas and will infer the most
-    appropriate columns when possible. When no column is suitable, a
-    synthetic dataset is returned.
-    """
-    if upload is None:
-        return np.empty(0), None
-
-    upload.seek(0)
-    df = pd.read_csv(upload)
-    if df.empty:
-        return np.empty(0), None
-
-    probability_candidates = [
-        col
-        for col in df.columns
-        if pd.api.types.is_numeric_dtype(df[col])
-    ]
-
-    probability_col = None
-    for candidate in probability_candidates:
-        lowered = candidate.lower()
-        if "prob" in lowered or "score" in lowered:
-            probability_col = candidate
-            break
-
-    if probability_col is None and probability_candidates:
-        probability_col = probability_candidates[0]
-
-    if probability_col is None:
-        return np.empty(0), None
-
-    probabilities = df[probability_col].to_numpy(dtype=float)
-
-    label_col = None
-    for candidate in df.columns:
-        lowered = candidate.lower()
-        if "label" in lowered or lowered in {"y", "target"}:
-            label_col = candidate
-            break
-
-    labels = None
-    if label_col is not None:
-        labels = df[label_col].to_numpy(dtype=float)
-
-    return probabilities, labels
+MAIN_SCRIPTS: Mapping[str, str] = {
+    "RotatE": "Main-RotatE.py",
+    "TransE": "Main-TransE.py",
+    "DistMult": "Main-DistMult.py",
+    "ComplEx": "Main-ComplEx.py",
+}
 
 
-def _synthesise_predictions(
-    n_samples: int,
-    seed: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    rng = np.random.default_rng(seed)
-    logits = rng.normal(loc=0.0, scale=1.25, size=n_samples)
-    probabilities = 1 / (1 + np.exp(-logits))
-    labels = rng.binomial(1, probabilities)
-    return probabilities, labels
+class ModuleLoadError(RuntimeError):
+    """Raised when one of the training scripts cannot be imported."""
+
+
+@st.cache_resource(show_spinner=False)
+def load_main_module(script_name: str):
+    """Load a ``Main-*.py`` script as a Python module."""
+
+    script_path = REPO_ROOT / script_name
+    if not script_path.exists():
+        raise ModuleLoadError(f"Script '{script_name}' not found under {REPO_ROOT}.")
+
+    module_name = f"kge_main_{script_path.stem.replace('-', '_')}"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise ModuleLoadError(f"Unable to create module spec for '{script_name}'.")
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)  # type: ignore[call-arg]
+    except Exception as exc:  # pragma: no cover - import errors bubble to UI
+        raise ModuleLoadError(f"Failed to import '{script_name}': {exc}") from exc
+
+    return module
+
+
+def _default_args(module) -> MutableMapping[str, object]:
+    """Return a mutable copy of the argparse namespace from the script."""
+
+    args = module.parse_args([])
+    return vars(args).copy()
+
+
+def _ensure_directory(path: str) -> str:
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 @dataclass
-class CalibrationResult:
-    probabilities_before: np.ndarray
-    probabilities_after: np.ndarray
-    labels: np.ndarray
+class PipelineResult:
+    """Collects artefacts generated by the execution of the pipeline."""
 
-    ece_before: float
-    ece_after: float
-    ace_before: float
-    ace_after: float
-    nll_before: float
-    nll_after: float
+    training_history: List[Mapping[str, float]]
+    validation_history: List[Mapping[str, float]]
+    validation_final: Mapping[str, float]
+    test_original: Mapping[str, float]
+    test_calibrated: Mapping[str, float]
+    log_text: str
 
 
-def placeholder_kgec(probabilities: np.ndarray, num_bins: int, lr: float) -> np.ndarray:
-    """Placeholder for the KGEC calibration routine.
+def execute_pipeline(module, args_dict: Mapping[str, object]) -> PipelineResult:
+    """Execute the original training & calibration loop using ``args_dict``."""
 
-    This implementation applies a smooth temperature scaling driven by the
-    configured hyperparameters. The real KGEC logic can replace this
-    function without changing the Streamlit interface.
-    """
-    probabilities = np.clip(probabilities, 1e-6, 1 - 1e-6)
-    logits = np.log(probabilities / (1 - probabilities))
-    temperature = 1.0 + (50 - num_bins) / 75.0 + (0.1 - lr) * 2
-    calibrated_logits = logits / max(temperature, 1e-3)
-    calibrated_probs = 1 / (1 + np.exp(-calibrated_logits))
-    return calibrated_probs
+    args_namespace = module.parse_args([])
+    for key, value in args_dict.items():
+        setattr(args_namespace, key, value)
 
+    if not (args_namespace.do_train or args_namespace.do_valid or args_namespace.do_test):
+        raise ValueError("At least one of training, validation, or testing must be enabled.")
 
-def compute_ece(probabilities: np.ndarray, labels: np.ndarray, num_bins: int = 15) -> float:
-    bins = np.linspace(0.0, 1.0, num_bins + 1)
-    bin_ids = np.digitize(probabilities, bins, right=True)
-    ece = 0.0
+    if getattr(args_namespace, "init_checkpoint", None):
+        module.override_config(args_namespace)
+    elif args_namespace.data_path is None:
+        raise ValueError("Either an initial checkpoint or a data path must be provided.")
 
-    for bin_index in range(1, len(bins)):
-        mask = bin_ids == bin_index
-        if not np.any(mask):
-            continue
-        prob_bin = probabilities[mask]
-        label_bin = labels[mask]
-        avg_confidence = prob_bin.mean()
-        accuracy = label_bin.mean()
-        ece += prob_bin.size / probabilities.size * abs(avg_confidence - accuracy)
-    return float(ece)
+    if args_namespace.do_train and args_namespace.save_path is None:
+        raise ValueError("A save path is required when training is enabled.")
 
+    if args_namespace.save_path:
+        _ensure_directory(args_namespace.save_path)
 
-def compute_ace(probabilities: np.ndarray, labels: np.ndarray, num_bins: int = 15) -> float:
-    if probabilities.size == 0:
-        return 0.0
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "3")
 
-    quantiles = np.linspace(0.0, 1.0, num_bins + 1)
-    bin_edges = np.quantile(probabilities, quantiles)
-    # Make sure edges are strictly increasing to avoid empty bins
-    bin_edges = np.unique(bin_edges)
-    if bin_edges.size <= 1:
-        return 0.0
+    module.set_logger(args_namespace)
+    log_buffer = io.StringIO()
+    stream_handler = logging.StreamHandler(log_buffer)
+    stream_handler.setLevel(logging.INFO)
+    logging.getLogger("").addHandler(stream_handler)
 
-    bin_ids = np.digitize(probabilities, bin_edges, right=True)
-    ace = 0.0
-    for edge_index in range(1, bin_edges.size):
-        mask = bin_ids == edge_index
-        if not np.any(mask):
-            continue
-        prob_bin = probabilities[mask]
-        label_bin = labels[mask]
-        avg_confidence = prob_bin.mean()
-        accuracy = label_bin.mean()
-        ace += prob_bin.size / probabilities.size * abs(avg_confidence - accuracy)
-    return float(ace)
+    training_history: List[Mapping[str, float]] = []
+    validation_history: List[Mapping[str, float]] = []
+    validation_final: Mapping[str, float] = {}
 
+    from calibration_training import KGEModel
+    from torch.utils.data import DataLoader
 
-def compute_nll(probabilities: np.ndarray, labels: np.ndarray) -> float:
-    probabilities = np.clip(probabilities, 1e-6, 1 - 1e-6)
-    nll = -(labels * np.log(probabilities) + (1 - labels) * np.log(1 - probabilities))
-    return float(np.mean(nll))
+    try:
+        data_path = Path(args_namespace.data_path)
+        with (data_path / "entities.dict").open() as fin:
+            entity2id = {entity: int(eid) for eid, entity in
+                         (line.strip().split("\t") for line in fin)}
 
+        with (data_path / "relations.dict").open() as fin:
+            relation2id = {relation: int(rid) for rid, relation in
+                           (line.strip().split("\t") for line in fin)}
 
-def run_calibration(
-    entity_embeddings: Optional[np.ndarray],
-    relation_embeddings: Optional[np.ndarray],
-    raw_probabilities: np.ndarray,
-    raw_labels: Optional[np.ndarray],
-    num_bins: int,
-    learning_rate: float,
-) -> CalibrationResult:
-    num_entities = 0 if entity_embeddings is None else entity_embeddings.shape[0]
-    num_relations = 0 if relation_embeddings is None else relation_embeddings.shape[0]
-    sample_size = max(100, min(1000, num_entities + num_relations))
+        args_namespace.nentity = len(entity2id)
+        args_namespace.nrelation = len(relation2id)
 
-    if raw_probabilities.size == 0:
-        probabilities, labels = _synthesise_predictions(sample_size, seed=num_entities + num_relations)
-    else:
-        probabilities = np.clip(raw_probabilities, 1e-6, 1 - 1e-6)
-        if raw_labels is None:
-            rng = np.random.default_rng(num_entities + num_relations or probabilities.size)
-            labels = rng.binomial(1, probabilities)
+        train_triples = module.read_triple(str(data_path / "train.txt"), entity2id, relation2id)
+        valid_triples = module.read_triple(str(data_path / "valid.txt"), entity2id, relation2id)
+        test_triples = module.read_triple(str(data_path / "test.txt"), entity2id, relation2id)
+        all_true_triples = train_triples + valid_triples + test_triples
+
+        kge_model = KGEModel(
+            model_name=args_namespace.model,
+            nentity=args_namespace.nentity,
+            nrelation=args_namespace.nrelation,
+            hidden_dim=args_namespace.hidden_dim,
+            gamma=args_namespace.gamma,
+            double_entity_embedding=args_namespace.double_entity_embedding,
+            double_relation_embedding=args_namespace.double_relation_embedding,
+        )
+
+        if args_namespace.cuda and torch.cuda.is_available():
+            kge_model = kge_model.to(torch.device(args_namespace.cuda_device))
         else:
-            labels = raw_labels
-            if labels.shape != probabilities.shape:
-                labels = np.resize(labels, probabilities.shape)
-                labels = np.clip(labels, 0, 1)
-    probabilities_before = probabilities
-    probabilities_after = placeholder_kgec(probabilities_before, num_bins, learning_rate)
+            args_namespace.cuda = False
 
-    ece_before = compute_ece(probabilities_before, labels)
-    ece_after = compute_ece(probabilities_after, labels)
-    ace_before = compute_ace(probabilities_before, labels)
-    ace_after = compute_ace(probabilities_after, labels)
-    nll_before = compute_nll(probabilities_before, labels)
-    nll_after = compute_nll(probabilities_after, labels)
+        if args_namespace.do_train:
+            train_dataloader_head = DataLoader(
+                TrainDataset(
+                    train_triples,
+                    args_namespace.nentity,
+                    args_namespace.nrelation,
+                    args_namespace.negative_sample_size,
+                    "head-batch",
+                ),
+                batch_size=args_namespace.batch_size,
+                shuffle=True,
+                num_workers=max(1, args_namespace.cpu_num // 2),
+                collate_fn=TrainDataset.collate_fn,
+            )
 
-    return CalibrationResult(
-        probabilities_before=probabilities_before,
-        probabilities_after=probabilities_after,
-        labels=labels,
-        ece_before=ece_before,
-        ece_after=ece_after,
-        ace_before=ace_before,
-        ace_after=ace_after,
-        nll_before=nll_before,
-        nll_after=nll_after,
-    )
+            train_dataloader_tail = DataLoader(
+                TrainDataset(
+                    train_triples,
+                    args_namespace.nentity,
+                    args_namespace.nrelation,
+                    args_namespace.negative_sample_size,
+                    "tail-batch",
+                ),
+                batch_size=args_namespace.batch_size,
+                shuffle=True,
+                num_workers=max(1, args_namespace.cpu_num // 2),
+                collate_fn=TrainDataset.collate_fn,
+            )
 
+            train_iterator = BidirectionalOneShotIterator(train_dataloader_head, train_dataloader_tail)
 
-def render_metrics(result: CalibrationResult) -> None:
-    metrics_df = pd.DataFrame(
-        {
-            "Metric": ["Expected Calibration Error", "Adaptive Calibration Error", "Negative Log-Likelihood"],
-            "Before KGEC": [result.ece_before, result.ace_before, result.nll_before],
-            "After KGEC": [result.ece_after, result.ace_after, result.nll_after],
-        }
-    )
-    st.subheader("Calibration Metrics")
-    st.dataframe(metrics_df.style.format({"Before KGEC": "{:.4f}", "After KGEC": "{:.4f}"}), use_container_width=True)
+            current_learning_rate = args_namespace.learning_rate
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, kge_model.parameters()),
+                lr=current_learning_rate,
+            )
+            warm_up_steps = args_namespace.warm_up_steps or args_namespace.max_steps // 2
 
-    long_df = metrics_df.melt(id_vars="Metric", var_name="Stage", value_name="Value")
-    chart = (
-        alt.Chart(long_df)
-        .mark_bar(opacity=0.8)
-        .encode(
-            x=alt.X("Metric", sort=None),
-            y=alt.Y("Value", title="Score"),
-            color=alt.Color("Stage", scale=alt.Scale(scheme="tableau20")),
-            column=alt.Column("Stage", header=alt.Header(title=""), spacing=10),
-            tooltip=["Stage", "Metric", alt.Tooltip("Value", format=".4f")],
+        if getattr(args_namespace, "init_checkpoint", None):
+            checkpoint_path = Path(args_namespace.init_checkpoint) / "checkpoint"
+            checkpoint = torch.load(checkpoint_path, map_location=args_namespace.cuda_device if args_namespace.cuda else "cpu")
+            init_step = checkpoint["step"]
+            kge_model.load_state_dict(checkpoint["model_state_dict"])
+            if args_namespace.do_train:
+                current_learning_rate = checkpoint["current_learning_rate"]
+                warm_up_steps = checkpoint["warm_up_steps"]
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        else:
+            init_step = 0
+
+        step = init_step
+        calibration_models_list: List = []
+
+        if args_namespace.do_train:
+            training_logs: List[Mapping[str, float]] = []
+            for step in range(init_step, args_namespace.max_steps):
+                log = kge_model.train_step(kge_model, optimizer, train_iterator, args_namespace)
+                training_logs.append(log)
+
+                if step >= warm_up_steps:
+                    current_learning_rate = current_learning_rate / 10
+                    optimizer = torch.optim.Adam(
+                        filter(lambda p: p.requires_grad, kge_model.parameters()),
+                        lr=current_learning_rate,
+                    )
+                    warm_up_steps = warm_up_steps * 3
+
+                if step % args_namespace.save_checkpoint_steps == 0:
+                    save_vars = {
+                        "step": step,
+                        "current_learning_rate": current_learning_rate,
+                        "warm_up_steps": warm_up_steps,
+                    }
+                    module.save_model(kge_model, optimizer, save_vars, args_namespace)
+
+                if step % args_namespace.log_steps == 0:
+                    metrics = {
+                        metric: float(np.mean([entry[metric] for entry in training_logs]))
+                        for metric in training_logs[0]
+                    }
+                    training_history.append({"step": float(step), **metrics})
+                    module.log_metrics("Training average", step, metrics)
+                    training_logs = []
+
+                if args_namespace.do_valid and step % args_namespace.valid_steps == 0:
+                    metrics = kge_model.test_step(
+                        kge_model,
+                        valid_triples,
+                        all_true_triples,
+                        args_namespace,
+                        calibration_models_list,
+                    )
+                    validation_history.append({"step": float(step), **{k: float(v) for k, v in metrics.items()}})
+                    module.log_metrics("Valid", step, metrics)
+
+            save_vars = {
+                "step": step,
+                "current_learning_rate": current_learning_rate,
+                "warm_up_steps": warm_up_steps,
+            }
+            module.save_model(kge_model, optimizer, save_vars, args_namespace)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        calibration_models_list.append(UncalCalibrator())
+        calibration_models_list.append(
+            KGEC(
+                num_bins=args_namespace.KGEC_num_bins,
+                init_temp=args_namespace.KGEC_initial_temperature,
+                lr=args_namespace.KGEC_learning_rate,
+            )
         )
-        .properties(width=200, height=300)
-    )
-    st.altair_chart(chart, use_container_width=True)
 
-
-def render_histograms(result: CalibrationResult) -> None:
-    st.subheader("Confidence Histograms")
-    before_df = pd.DataFrame({"Probability": result.probabilities_before, "Stage": "Before KGEC"})
-    after_df = pd.DataFrame({"Probability": result.probabilities_after, "Stage": "After KGEC"})
-    hist_df = pd.concat([before_df, after_df], ignore_index=True)
-
-    hist_chart = (
-        alt.Chart(hist_df)
-        .mark_bar(opacity=0.7)
-        .encode(
-            x=alt.X("Probability", bin=alt.Bin(maxbins=25), title="Predicted Probability"),
-            y=alt.Y("count()", title="Count"),
-            color=alt.Color("Stage", scale=alt.Scale(scheme="set2")),
-            facet=alt.Facet("Stage", columns=2, header=alt.Header(labelOrient="bottom")),
+        metrics = kge_model.test_step(
+            kge_model,
+            valid_triples,
+            all_true_triples,
+            args_namespace,
+            calibration_models_list,
+            True,
         )
-        .properties(height=300)
-    )
-    st.altair_chart(hist_chart, use_container_width=True)
+        validation_final = {k: float(v) for k, v in metrics.items()}
+
+        test_original, test_calibrated = kge_model.calibration_predict(
+            kge_model,
+            test_triples,
+            all_true_triples,
+            args_namespace,
+            calibration_models_list,
+        )
+
+        return PipelineResult(
+            training_history=training_history,
+            validation_history=validation_history,
+            validation_final=validation_final,
+            test_original={k: float(v) for k, v in test_original.items()},
+            test_calibrated={k: float(v) for k, v in test_calibrated.items()},
+            log_text=log_buffer.getvalue(),
+        )
+
+    finally:
+        logging.getLogger("").removeHandler(stream_handler)
 
 
-def render_ablation_toggle(result: CalibrationResult) -> None:
-    st.subheader("Ablation Study (Placeholder)")
-    st.info(
-        "This section can be extended with ablation metrics or visualisations "
-        "once experimental results are available. Replace this message with "
-        "domain-specific insights when ready."
-    )
+# ---------------------------------------------------------------------------
+# Streamlit layout helpers
+# ---------------------------------------------------------------------------
+
+def _format_metric_table(metrics: Mapping[str, float]) -> pd.DataFrame:
+    return pd.DataFrame({"Metric": list(metrics.keys()), "Value": list(metrics.values())})
 
 
-def main() -> None:
-    st.title("KGE Calibrator Demo")
-    st.markdown(
-        """
-        **KGE Calibrator (KGEC)** enhances the trustworthiness of link prediction models
-        by aligning predicted probabilities with observed outcomes. This demo showcases
-        how KGEC can post-process Knowledge Graph Embedding (KGE) model outputs to deliver
-        better-calibrated confidence scores.
+def _split_calibration_metrics(metrics: Mapping[str, float]) -> Dict[str, Dict[str, float]]:
+    grouped: Dict[str, Dict[str, float]] = {}
+    for key, value in metrics.items():
+        if "_" not in key:
+            grouped.setdefault("Combined", {})[key] = value
+            continue
+        calibrator, metric = key.split("_", 1)
+        grouped.setdefault(calibrator, {})[metric] = value
+    return grouped
 
-        - 📄 EMNLP 2025 Paper: *KGE Calibrator: An Efficient Probability Calibration Method of Knowledge Graph Embedding Models for Trustworthy Link Prediction*
-        - 💻 GitHub: [KGE-Calibrator Repository](https://github.com/your-repo/KGE-Calibrator)
-        - 📝 Citation: *Author et al., EMNLP 2025*
-        """
-    )
 
-    with st.sidebar:
-        st.header("Inputs")
-        entity_upload = st.file_uploader("Entity embeddings (.npy)", type=["npy"], key="entity")
-        relation_upload = st.file_uploader("Relation embeddings (.npy)", type=["npy"], key="relation")
-        scores_upload = st.file_uploader("Prediction scores (.csv, optional)", type=["csv"], key="scores")
-
-        st.header("KGEC Hyperparameters")
-        num_bins = st.slider("KGEC number of bins", min_value=5, max_value=50, value=10, step=1)
-        learning_rate = st.selectbox("Learning rate", options=[0.1, 0.01, 0.001], index=1)
-
-        show_ablation = st.checkbox("Show ablation placeholder", value=False)
-
-        run_demo = st.button("Run Calibration")
-
-    if not run_demo:
-        st.info("Upload embeddings, configure the hyperparameters, and click **Run Calibration** to begin.")
+def _display_training_history(history: Iterable[Mapping[str, float]], title: str) -> None:
+    history = list(history)
+    if not history:
         return
+    st.subheader(title)
+    df = pd.DataFrame(history)
+    numeric_cols = [col for col in df.columns if col != "step"]
+    st.dataframe(df.style.format({col: "{:.6f}" for col in numeric_cols}), use_container_width=True)
 
-    if entity_upload is None or relation_upload is None:
-        st.warning("Please upload both entity and relation embedding files to continue.")
+
+def _display_logs(log_text: str) -> None:
+    if not log_text.strip():
         return
+    st.subheader("Execution Log")
+    st.text(log_text)
 
-    entity_embeddings = _load_numpy(entity_upload)
-    relation_embeddings = _load_numpy(relation_upload)
-    raw_probabilities, raw_labels = _read_probabilities(scores_upload)
 
-    with st.expander("Embedding overview", expanded=False):
-        st.write("Entity embeddings shape:", None if entity_embeddings is None else entity_embeddings.shape)
-        st.write("Relation embeddings shape:", None if relation_embeddings is None else relation_embeddings.shape)
+# ---------------------------------------------------------------------------
+# Application entry point
+# ---------------------------------------------------------------------------
 
-    result = run_calibration(
-        entity_embeddings=entity_embeddings,
-        relation_embeddings=relation_embeddings,
-        raw_probabilities=raw_probabilities,
-        raw_labels=raw_labels,
-        num_bins=num_bins,
-        learning_rate=float(learning_rate),
+st.title("KGE Calibrator Demo")
+st.markdown(
+    """
+    This Streamlit application runs the **exact** KGEC training and evaluation
+    pipeline distributed with the repository. Configure the options in the
+    sidebar and execute the routine to reproduce the original command-line
+    results.
+    """
+)
+
+with st.sidebar:
+    st.header("Configuration")
+
+    model_name = st.selectbox("KGE model", list(MAIN_SCRIPTS.keys()), index=0)
+    script_name = MAIN_SCRIPTS[model_name]
+
+    try:
+        module = load_main_module(script_name)
+        defaults = _default_args(module)
+    except ModuleLoadError as exc:
+        st.error(str(exc))
+        st.stop()
+
+    data_path = st.text_input("Data path", value=str(defaults.get("data_path", "")))
+    save_path = st.text_input("Model save path", value=str(defaults.get("save_path", "")))
+    init_checkpoint = st.text_input("Initial checkpoint", value=str(defaults.get("init_checkpoint", "")))
+
+    do_train = st.checkbox("Train KG model", value=bool(defaults.get("do_train", True)))
+    do_valid = st.checkbox("Run validation", value=bool(defaults.get("do_valid", True)))
+    do_test = st.checkbox("Run test", value=bool(defaults.get("do_test", True)))
+    evaluate_train = st.checkbox("Evaluate train set", value=bool(defaults.get("evaluate_train", False)))
+
+    cuda_available = torch.cuda.is_available()
+    cuda_default = bool(defaults.get("cuda", True) and cuda_available)
+    use_cuda = st.checkbox("Use CUDA", value=cuda_default, disabled=not cuda_available)
+    cuda_device = st.text_input("CUDA device", value=str(defaults.get("cuda_device", "cuda")))
+    cuda_visible_devices = st.text_input("CUDA_VISIBLE_DEVICES", value=os.environ.get("CUDA_VISIBLE_DEVICES", "3"))
+
+    with st.expander("Training hyperparameters", expanded=False):
+        batch_size = st.number_input("Batch size", min_value=1, value=int(defaults.get("batch_size", 512)))
+        negative_sample_size = st.number_input(
+            "Negative sample size", min_value=1, value=int(defaults.get("negative_sample_size", 1024))
+        )
+        hidden_dim = st.number_input("Hidden dimension", min_value=1, value=int(defaults.get("hidden_dim", 500)))
+        gamma = st.number_input("Gamma", value=float(defaults.get("gamma", 6.0)))
+        adversarial_temperature = st.number_input(
+            "Adversarial temperature", value=float(defaults.get("adversarial_temperature", 0.5)), format="%.4f"
+        )
+        learning_rate = st.number_input(
+            "Learning rate", value=float(defaults.get("learning_rate", 5e-5)), format="%.6f"
+        )
+        max_steps = st.number_input("Max training steps", min_value=1, value=int(defaults.get("max_steps", 80000)))
+        save_checkpoint_steps = st.number_input(
+            "Checkpoint interval", min_value=1, value=int(defaults.get("save_checkpoint_steps", 10000))
+        )
+        valid_steps = st.number_input("Validation interval", min_value=1, value=int(defaults.get("valid_steps", 10000)))
+        log_steps = st.number_input("Log interval", min_value=1, value=int(defaults.get("log_steps", 100)))
+        test_batch_size = st.number_input(
+            "Test batch size", min_value=1, value=int(defaults.get("test_batch_size", 8))
+        )
+        valid_batch_size = st.number_input(
+            "Validation batch size", min_value=1, value=int(defaults.get("valid_batch_size", 5))
+        )
+        cpu_num = st.number_input("CPU workers", min_value=1, value=int(defaults.get("cpu_num", 16)))
+        regularization = st.number_input(
+            "Regularization (L3)", min_value=0.0, value=float(defaults.get("regularization", 0.0)), format="%.6f"
+        )
+
+    with st.expander("KGEC hyperparameters", expanded=False):
+        num_bins = st.number_input("Number of bins", min_value=1, value=int(defaults.get("KGEC_num_bins", 10)))
+        kgec_lr = st.number_input(
+            "KGEC learning rate", min_value=1e-6, value=float(defaults.get("KGEC_learning_rate", 0.01)), format="%.6f"
+        )
+        initial_temperature = st.number_input(
+            "Initial temperature", value=float(defaults.get("KGEC_initial_temperature", 1.0)), format="%.4f"
+        )
+
+    run_button = st.button("Run KGEC pipeline")
+
+
+if run_button:
+    if not data_path:
+        st.error("A data path must be specified.")
+        st.stop()
+
+    if do_train and not save_path:
+        st.error("Please provide a model save path when training is enabled.")
+        st.stop()
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices or "3"
+
+    args_updates = {
+        "data_path": data_path,
+        "save_path": save_path or init_checkpoint,
+        "init_checkpoint": init_checkpoint,
+        "do_train": do_train,
+        "do_valid": do_valid,
+        "do_test": do_test,
+        "evaluate_train": evaluate_train,
+        "cuda": bool(use_cuda and torch.cuda.is_available()),
+        "cuda_device": cuda_device if use_cuda and torch.cuda.is_available() else "cpu",
+        "batch_size": batch_size,
+        "negative_sample_size": negative_sample_size,
+        "hidden_dim": hidden_dim,
+        "gamma": gamma,
+        "adversarial_temperature": adversarial_temperature,
+        "learning_rate": learning_rate,
+        "max_steps": max_steps,
+        "save_checkpoint_steps": save_checkpoint_steps,
+        "valid_steps": valid_steps,
+        "log_steps": log_steps,
+        "test_batch_size": test_batch_size,
+        "valid_batch_size": valid_batch_size,
+        "cpu_num": cpu_num,
+        "regularization": regularization,
+        "KGEC_num_bins": num_bins,
+        "KGEC_learning_rate": kgec_lr,
+        "KGEC_initial_temperature": initial_temperature,
+    }
+
+    if not args_updates["save_path"]:
+        args_updates["save_path"] = defaults.get("save_path") or defaults.get("init_checkpoint")
+    if not args_updates["init_checkpoint"]:
+        args_updates["init_checkpoint"] = defaults.get("init_checkpoint")
+
+    args_updates.setdefault("double_entity_embedding", defaults.get("double_entity_embedding", False))
+    args_updates.setdefault("double_relation_embedding", defaults.get("double_relation_embedding", False))
+    args_updates.setdefault("negative_adversarial_sampling", defaults.get("negative_adversarial_sampling", True))
+    args_updates.setdefault("uni_weight", defaults.get("uni_weight", True))
+    args_updates.setdefault("test_log_steps", defaults.get("test_log_steps", 1000))
+
+    with st.spinner("Executing KGEC pipeline. This may take a while depending on the configuration..."):
+        try:
+            result = execute_pipeline(module, args_updates)
+        except Exception as exc:  # pragma: no cover - surfaced to UI
+            st.error(f"Pipeline execution failed: {exc}")
+            st.stop()
+
+    st.success("Pipeline finished successfully.")
+
+    st.subheader("Validation Metrics (final run)")
+    st.dataframe(
+        _format_metric_table(result.validation_final).style.format({"Value": "{:.6f}"}),
+        use_container_width=True,
     )
 
-    render_metrics(result)
-    render_histograms(result)
+    st.subheader("Test Metrics (before calibration)")
+    st.dataframe(
+        _format_metric_table(result.test_original).style.format({"Value": "{:.6f}"}),
+        use_container_width=True,
+    )
 
-    if show_ablation:
-        render_ablation_toggle(result)
+    st.subheader("Test Metrics (after calibration)")
+    grouped_metrics = _split_calibration_metrics(result.test_calibrated)
+    for calibrator_name, metrics in grouped_metrics.items():
+        st.markdown(f"**{calibrator_name}**")
+        st.dataframe(
+            _format_metric_table(metrics).style.format({"Value": "{:.6f}"}),
+            use_container_width=True,
+        )
 
+    _display_training_history(result.training_history, "Training History")
+    _display_training_history(result.validation_history, "Validation History (during training)")
+    _display_logs(result.log_text)
 
-if __name__ == "__main__":
-    main()
