@@ -6,7 +6,10 @@ from __future__ import print_function
 
 import gc
 import logging
+from typing import Dict, List, Tuple
+
 import numpy as np
+from scipy.stats import entropy
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -425,28 +428,10 @@ class KGEModel(nn.Module):
         torch.cuda.empty_cache()
 
         logging.info('KGE Calibrator training start.')
-        # Jump Selection Strategy
-        from scipy.stats import entropy
-        # Compute softmax and sort scores
-        all_model_score = all_model_score.softmax(-1).cpu()
-        sorted_all_model_score = torch.sort(all_model_score, dim=1, descending=True)[0]
-
-        # Vectorized KL divergence computation
-        kl_divergences = np.array([
-            entropy(sorted_all_model_score[:, i - 1].numpy(), sorted_all_model_score[:, i].numpy())
-            for i in range(1, sorted_all_model_score.shape[1])
-        ])
-
-        # Find maximum jump information
-        arg_max_jump = kl_divergences.argmax()
-        # Jump Selection Strategy
+        calibration_scores, arg_max_jump = _prepare_scores_for_calibration(torch.as_tensor(all_model_score))
 
         if calibrate:
-            for calibration_model in calibration_models_list:
-                if calibration_model.name == "KGEC":
-                    calibration_model.fit(all_model_score, all_positive_arg, jump_index=arg_max_jump)
-                else:
-                    calibration_model.fit(all_model_score, all_positive_arg)
+            _fit_calibrators(calibration_models_list, calibration_scores, torch.as_tensor(all_positive_arg), arg_max_jump)
         logging.info('KGE Calibrator training finished.')
 
         metrics = {metric: sum(values) / len(values) for metric, values in metrics_dict.items()}
@@ -489,23 +474,8 @@ class KGEModel(nn.Module):
 
         test_dataset_list = [test_dataloader_head, test_dataloader_tail]
 
-        # Initialize metrics dictionaries
-        original_metrics_dict = {k: [] for k in ['MRR', 'MR', 'HITS@1', 'HITS@3', 'HITS@10']}
-        metrics_dict = {calibration_model.name: {} for calibration_model in calibration_models_list}
-
-        # Define metrics
-        metric_calibration = ['ECE', 'ACE', 'NLL']
-        metric_kge = ['MRR', 'MR', 'HITS@1', 'HITS@3', 'HITS@10']
-
-        # Initialize dictionaries for each calibration model
-        for calibration_model_name in metrics_dict:
-            metrics_dict[calibration_model_name] = {metric: [] for metric in metric_kge + metric_calibration}
-
-        metrics_after = {calibration_model.name: {
-            'ECE': CalibrationError(task="multiclass", num_classes=args.nentity),
-            'ACE': AdaptiveCalibrationError(task="multiclass", num_classes=args.nentity),
-            'NLL': CategoricalNLL()
-        } for calibration_model in calibration_models_list}
+        collected_scores: List[torch.Tensor] = []
+        collected_targets: List[torch.Tensor] = []
 
         step = 0
         total_steps = sum([len(dataset) for dataset in test_dataset_list])
@@ -530,50 +500,168 @@ class KGEModel(nn.Module):
                     else:
                         raise ValueError(f"mode {mode} not supported")
 
-                    target = positive_arg.cpu()
-                    original_argsort = torch.argsort(original_model_score, dim=1, descending=True)
-
-                    for i in range(batch_size):
-                        original_ranking = (original_argsort[i] ==
-                                            positive_arg[i].cpu()).nonzero(as_tuple=True)[0].item() + 1
-                        original_metrics_dict['MRR'].append(1.0 / original_ranking)
-                        original_metrics_dict['MR'].append(float(original_ranking))
-                        for k in [1, 3, 10]:
-                            original_metrics_dict[f'HITS@{k}'].append(1.0 if original_ranking <= k else 0.0)
-
-                    for calibration_model in calibration_models_list:
-                        probs_after = calibration_model.predict(original_model_score).cpu()
-                        new_argsort = torch.argsort(probs_after, dim=1, descending=True)
-
-                        # Update post-calibration metrics
-                        for metric_name, metric_fn in metrics_after[calibration_model.name].items():
-                            metric_fn.update(probs_after, target)
-
-                        # do not print metric_kge
-                        for i in range(batch_size):
-                            new_ranking = (new_argsort[i] == positive_arg[i].cpu()).nonzero(as_tuple=True)[0].item() + 1
-                            metrics_dict[calibration_model.name]['MRR'].append(1.0 / new_ranking)
-                            metrics_dict[calibration_model.name]['MR'].append(float(new_ranking))
-                            for k in [1, 3, 10]:
-                                metrics_dict[calibration_model.name][f'HITS@{k}'].append(
-                                    1.0 if new_ranking <= k else 0.0)
+                    collected_scores.append(original_model_score.detach().cpu())
+                    collected_targets.append(positive_arg.detach().cpu())
 
                     if step % args.test_log_steps == 0:
                         logging.info(f'Evaluating the model... ({step}/{total_steps})')
 
                     step += 1
 
-        # Aggregate results
-        original_metrics = {metric: sum(values) / len(values) for metric, values in original_metrics_dict.items()}
-        calibrate_metrics = {
-            f'{model}_{metric}': sum(values) / len(values) if values else 0
-            for model, metrics in metrics_dict.items() for metric, values in metrics.items()
+        if collected_scores:
+            stacked_scores = torch.cat(collected_scores, dim=0)
+            stacked_targets = torch.cat(collected_targets, dim=0)
+        else:
+            stacked_scores = torch.empty((0, args.nentity), dtype=torch.float32)
+            stacked_targets = torch.empty((0,), dtype=torch.long)
+
+        return _compute_metrics_from_scores(stacked_scores, stacked_targets, calibration_models_list, args.nentity)
+
+
+def _prepare_scores_for_calibration(all_model_score: torch.Tensor) -> Tuple[torch.Tensor, int]:
+    """Convert logits to probabilities and determine the jump index.
+
+    Parameters
+    ----------
+    all_model_score: torch.Tensor
+        Logits or scores output by the KGE model.
+
+    Returns
+    -------
+    Tuple[torch.Tensor, int]
+        A tuple containing probability scores suitable for calibration and the
+        selected jump index following the original jump selection strategy.
+    """
+
+    if all_model_score.numel() == 0:
+        return all_model_score.clone(), 0
+
+    probabilities = all_model_score.softmax(-1).cpu()
+    if probabilities.size(1) <= 1:
+        return probabilities, 0
+
+    sorted_probs = torch.sort(probabilities, dim=1, descending=True)[0]
+    kl_divergences = np.array([
+        entropy(sorted_probs[:, i - 1].numpy(), sorted_probs[:, i].numpy())
+        for i in range(1, sorted_probs.shape[1])
+    ])
+
+    arg_max_jump = int(kl_divergences.argmax()) if kl_divergences.size else 0
+    return probabilities, arg_max_jump
+
+
+def _fit_calibrators(calibration_models_list, calibration_scores: torch.Tensor, all_positive_arg: torch.Tensor, jump_index: int) -> None:
+    """Train calibration models using the provided probability scores."""
+
+    if calibration_scores.numel() == 0:
+        return
+
+    for calibration_model in calibration_models_list:
+        if calibration_model.name == "KGEC":
+            calibration_model.fit(calibration_scores, all_positive_arg, jump_index=jump_index)
+        else:
+            calibration_model.fit(calibration_scores, all_positive_arg)
+
+
+def _prepare_positive_indices(labels: torch.Tensor) -> torch.Tensor:
+    """Convert one-hot encoded labels into index form when required."""
+
+    labels = labels.to(torch.float32)
+    if labels.dim() == 2:
+        return torch.argmax(labels, dim=1).to(torch.long)
+    return labels.view(-1).to(torch.long)
+
+
+def _compute_metrics_from_scores(
+    all_model_score: torch.Tensor,
+    positive_indices: torch.Tensor,
+    calibration_models_list,
+    nentity: int,
+) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """Compute ranking and calibration metrics from pre-computed scores."""
+
+    logits = all_model_score.to(torch.float32)
+    if logits.dim() == 1:
+        logits = logits.unsqueeze(0)
+
+    positive_indices = _prepare_positive_indices(positive_indices)
+
+    if logits.size(0) == 0:
+        metric_names = ['MRR', 'MR', 'HITS@1', 'HITS@3', 'HITS@10']
+        original_metrics = {name: 0.0 for name in metric_names}
+        calibrate_metrics: Dict[str, float] = {}
+        calibration_metric_names = metric_names + ['ECE', 'ACE', 'NLL']
+        for calibration_model in calibration_models_list:
+            for metric_name in calibration_metric_names:
+                calibrate_metrics[f'{calibration_model.name}_{metric_name}'] = 0.0
+        return original_metrics, calibrate_metrics
+
+    if positive_indices.shape[0] != logits.shape[0]:
+        raise ValueError('Number of labels does not match number of score rows.')
+
+    argsort = torch.argsort(logits, dim=1, descending=True)
+    matches = argsort.eq(positive_indices.view(-1, 1))
+    ranking_positions = matches.nonzero(as_tuple=False)
+    if ranking_positions.numel() == 0:
+        raise ValueError('Unable to locate positive targets in the provided scores.')
+
+    ranking = torch.zeros(logits.size(0), dtype=torch.long)
+    ranking[ranking_positions[:, 0]] = ranking_positions[:, 1] + 1
+    ranking = ranking.to(torch.float32)
+
+    original_metrics = {
+        'MRR': torch.mean(1.0 / ranking).item(),
+        'MR': torch.mean(ranking).item(),
+        'HITS@1': torch.mean((ranking <= 1).to(torch.float32)).item(),
+        'HITS@3': torch.mean((ranking <= 3).to(torch.float32)).item(),
+        'HITS@10': torch.mean((ranking <= 10).to(torch.float32)).item(),
+    }
+
+    calibrate_metrics: Dict[str, float] = {}
+
+    for calibration_model in calibration_models_list:
+        probs_after = calibration_model.predict(logits).cpu()
+        new_argsort = torch.argsort(probs_after, dim=1, descending=True)
+        new_matches = new_argsort.eq(positive_indices.view(-1, 1))
+        new_positions = new_matches.nonzero(as_tuple=False)
+        new_ranking = torch.zeros_like(ranking, dtype=torch.long)
+        new_ranking[new_positions[:, 0]] = new_positions[:, 1] + 1
+        new_ranking = new_ranking.to(torch.float32)
+
+        calibrate_metrics[f'{calibration_model.name}_MRR'] = torch.mean(1.0 / new_ranking).item()
+        calibrate_metrics[f'{calibration_model.name}_MR'] = torch.mean(new_ranking).item()
+        calibrate_metrics[f'{calibration_model.name}_HITS@1'] = torch.mean((new_ranking <= 1).to(torch.float32)).item()
+        calibrate_metrics[f'{calibration_model.name}_HITS@3'] = torch.mean((new_ranking <= 3).to(torch.float32)).item()
+        calibrate_metrics[f'{calibration_model.name}_HITS@10'] = torch.mean((new_ranking <= 10).to(torch.float32)).item()
+
+        metric_objects = {
+            'ECE': CalibrationError(task="multiclass", num_classes=nentity),
+            'ACE': AdaptiveCalibrationError(task="multiclass", num_classes=nentity),
+            'NLL': CategoricalNLL(),
         }
 
-        # Inject calibration error metrics after scaling
-        for model_name in metrics_after:
-            calibrate_metrics[f'{model_name}_ECE'] = metrics_after[model_name]['ECE'].compute().item()
-            calibrate_metrics[f'{model_name}_ACE'] = metrics_after[model_name]['ACE'].compute().item()
-            calibrate_metrics[f'{model_name}_NLL'] = metrics_after[model_name]['NLL'].compute().item()
+        for metric_name, metric_fn in metric_objects.items():
+            metric_fn.update(probs_after, positive_indices)
+            calibrate_metrics[f'{calibration_model.name}_{metric_name}'] = metric_fn.compute().item()
 
-        return original_metrics, calibrate_metrics
+    return original_metrics, calibrate_metrics
+
+
+def calibrate_and_evaluate_from_scores(
+    valid_scores: torch.Tensor,
+    valid_labels: torch.Tensor,
+    test_scores: torch.Tensor,
+    test_labels: torch.Tensor,
+    calibration_models_list,
+    nentity: int,
+) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """Utility to reproduce script metrics using pre-computed scores."""
+
+    valid_scores_tensor = torch.as_tensor(valid_scores, dtype=torch.float32)
+    calibration_scores, jump_index = _prepare_scores_for_calibration(valid_scores_tensor)
+    _fit_calibrators(calibration_models_list, calibration_scores, torch.as_tensor(valid_labels), jump_index)
+
+    test_scores_tensor = torch.as_tensor(test_scores, dtype=torch.float32)
+    positive_indices = _prepare_positive_indices(torch.as_tensor(test_labels))
+
+    return _compute_metrics_from_scores(test_scores_tensor, positive_indices, calibration_models_list, nentity)
