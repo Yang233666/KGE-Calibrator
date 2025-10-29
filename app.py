@@ -52,6 +52,46 @@ MAIN_SCRIPTS: Mapping[str, str] = {
 }
 
 
+DATASET_REGISTRY: Mapping[str, Mapping[str, object]] = {
+    "WN18": {
+        "data_dir": REPO_ROOT / "data" / "wn18",
+        "checkpoints": {
+            "RotatE": REPO_ROOT / "models" / "RotatE_wn18",
+            "TransE": REPO_ROOT / "models" / "TransE_wn18",
+            "DistMult": REPO_ROOT / "models" / "DistMult_wn18",
+            "ComplEx": REPO_ROOT / "models" / "ComplEx_wn18",
+        },
+    },
+    "WN18RR": {
+        "data_dir": REPO_ROOT / "data" / "wn18rr",
+        "checkpoints": {
+            "RotatE": REPO_ROOT / "models" / "RotatE_wn18rr",
+            "TransE": REPO_ROOT / "models" / "TransE_wn18rr",
+            "DistMult": REPO_ROOT / "models" / "DistMult_wn18rr",
+            "ComplEx": REPO_ROOT / "models" / "ComplEx_wn18rr",
+        },
+    },
+    "FB15K": {
+        "data_dir": REPO_ROOT / "data" / "fb15k",
+        "checkpoints": {
+            "RotatE": REPO_ROOT / "models" / "RotatE_fb15k",
+            "TransE": REPO_ROOT / "models" / "TransE_fb15k",
+            "DistMult": REPO_ROOT / "models" / "DistMult_fb15k",
+            "ComplEx": REPO_ROOT / "models" / "ComplEx_fb15k",
+        },
+    },
+    "FB15K-1237": {
+        "data_dir": REPO_ROOT / "data" / "fb15k-1237",
+        "checkpoints": {
+            "RotatE": REPO_ROOT / "models" / "RotatE_fb15k-1237",
+            "TransE": REPO_ROOT / "models" / "TransE_fb15k-1237",
+            "DistMult": REPO_ROOT / "models" / "DistMult_fb15k-1237",
+            "ComplEx": REPO_ROOT / "models" / "ComplEx_fb15k-1237",
+        },
+    },
+}
+
+
 class ModuleLoadError(RuntimeError):
     """Raised when one of the training scripts cannot be imported."""
 
@@ -88,6 +128,59 @@ def _default_args(module) -> MutableMapping[str, object]:
 def _ensure_directory(path: str) -> str:
     os.makedirs(path, exist_ok=True)
     return path
+
+
+STRING_FIELDS = {"data_path", "save_path", "init_checkpoint", "cuda_device"}
+BOOL_FIELDS = {"do_train", "do_valid", "do_test", "evaluate_train", "cuda"}
+INT_FIELDS = {
+    "batch_size",
+    "negative_sample_size",
+    "hidden_dim",
+    "max_steps",
+    "save_checkpoint_steps",
+    "valid_steps",
+    "log_steps",
+    "test_batch_size",
+    "valid_batch_size",
+    "cpu_num",
+    "KGEC_num_bins",
+}
+FLOAT_FIELDS = {
+    "gamma",
+    "adversarial_temperature",
+    "learning_rate",
+    "regularization",
+    "KGEC_learning_rate",
+    "KGEC_initial_temperature",
+}
+
+
+def _coerce_default(key: str, value: object) -> object:
+    if key in STRING_FIELDS:
+        if value in (None, ""):
+            return ""
+        return str(value)
+    if key in BOOL_FIELDS:
+        return bool(value)
+    if key in INT_FIELDS:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    if key in FLOAT_FIELDS:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+    return value
+
+
+def _sync_widget_state(defaults: Mapping[str, object], keys: Iterable[str], selection_changed: bool) -> None:
+    for key in keys:
+        state_key = f"config_{key}"
+        default_value = _coerce_default(key, defaults.get(key))
+        if state_key not in st.session_state or selection_changed:
+            st.session_state[state_key] = default_value
 
 
 @dataclass
@@ -370,7 +463,8 @@ st.markdown(
 with st.sidebar:
     st.header("Configuration")
 
-    model_name = st.selectbox("KGE model", list(MAIN_SCRIPTS.keys()), index=0)
+    model_name = st.selectbox("KGE model", list(MAIN_SCRIPTS.keys()), index=0, key="selected_model")
+    dataset_name = st.selectbox("Dataset", list(DATASET_REGISTRY.keys()), index=0, key="selected_dataset")
     script_name = MAIN_SCRIPTS[model_name]
 
     try:
@@ -380,58 +474,86 @@ with st.sidebar:
         st.error(str(exc))
         st.stop()
 
-    data_path = st.text_input("Data path", value=str(defaults.get("data_path", "")))
-    save_path = st.text_input("Model save path", value=str(defaults.get("save_path", "")))
-    init_checkpoint = st.text_input("Initial checkpoint", value=str(defaults.get("init_checkpoint", "")))
+    derived_defaults = defaults.copy()
+    dataset_defaults = DATASET_REGISTRY.get(dataset_name, {})
+    data_dir = dataset_defaults.get("data_dir") if isinstance(dataset_defaults, Mapping) else None
+    checkpoints = dataset_defaults.get("checkpoints") if isinstance(dataset_defaults, Mapping) else {}
+    checkpoint_path_str = ""
+    if data_dir is not None:
+        derived_defaults["data_path"] = str(data_dir)
+    if isinstance(checkpoints, Mapping) and model_name in checkpoints:
+        checkpoint_path = checkpoints[model_name]
+        checkpoint_path_str = str(checkpoint_path)
+        derived_defaults["save_path"] = checkpoint_path_str
+        derived_defaults["init_checkpoint"] = checkpoint_path_str
 
-    do_train = st.checkbox("Train KG model", value=bool(defaults.get("do_train", True)))
-    do_valid = st.checkbox("Run validation", value=bool(defaults.get("do_valid", True)))
-    do_test = st.checkbox("Run test", value=bool(defaults.get("do_test", True)))
-    evaluate_train = st.checkbox("Evaluate train set", value=bool(defaults.get("evaluate_train", False)))
+    derived_defaults["model"] = model_name
 
     cuda_available = torch.cuda.is_available()
-    cuda_default = bool(defaults.get("cuda", True) and cuda_available)
-    use_cuda = st.checkbox("Use CUDA", value=cuda_default, disabled=not cuda_available)
-    cuda_device = st.text_input("CUDA device", value=str(defaults.get("cuda_device", "cuda")))
-    cuda_visible_devices = st.text_input("CUDA_VISIBLE_DEVICES", value=os.environ.get("CUDA_VISIBLE_DEVICES", "3"))
+    derived_defaults["cuda"] = bool(derived_defaults.get("cuda", True) and cuda_available)
+    derived_defaults["cuda_device"] = (
+        "cpu" if not derived_defaults["cuda"] else str(derived_defaults.get("cuda_device", "cuda"))
+    )
+
+    selection_changed = False
+    if st.session_state.get("prev_model") != model_name or st.session_state.get("prev_dataset") != dataset_name:
+        selection_changed = True
+
+    widget_keys = list(STRING_FIELDS | BOOL_FIELDS | INT_FIELDS | FLOAT_FIELDS)
+    _sync_widget_state(derived_defaults, widget_keys, selection_changed)
+
+    if "config_cuda_visible_devices" not in st.session_state or selection_changed:
+        st.session_state["config_cuda_visible_devices"] = os.environ.get("CUDA_VISIBLE_DEVICES", "3")
+
+    st.session_state["prev_model"] = model_name
+    st.session_state["prev_dataset"] = dataset_name
+
+    data_path = st.text_input("Data path", key="config_data_path")
+    if data_dir is not None:
+        st.caption(f"Expected dataset files directory: `{data_dir}`")
+    save_path = st.text_input("Model save path", key="config_save_path")
+    init_checkpoint = st.text_input("Initial checkpoint", key="config_init_checkpoint")
+    if checkpoint_path_str:
+        st.caption(f"Expected {model_name} checkpoint directory: `{checkpoint_path_str}`")
+
+    do_train = st.checkbox("Train KG model", key="config_do_train")
+    do_valid = st.checkbox("Run validation", key="config_do_valid")
+    do_test = st.checkbox("Run test", key="config_do_test")
+    evaluate_train = st.checkbox("Evaluate train set", key="config_evaluate_train")
+
+    use_cuda = st.checkbox("Use CUDA", key="config_cuda", disabled=not cuda_available)
+    cuda_device = st.text_input("CUDA device", key="config_cuda_device")
+    cuda_visible_devices = st.text_input("CUDA_VISIBLE_DEVICES", key="config_cuda_visible_devices")
 
     with st.expander("Training hyperparameters", expanded=False):
-        batch_size = st.number_input("Batch size", min_value=1, value=int(defaults.get("batch_size", 512)))
-        negative_sample_size = st.number_input(
-            "Negative sample size", min_value=1, value=int(defaults.get("negative_sample_size", 1024))
-        )
-        hidden_dim = st.number_input("Hidden dimension", min_value=1, value=int(defaults.get("hidden_dim", 500)))
-        gamma = st.number_input("Gamma", value=float(defaults.get("gamma", 6.0)))
+        batch_size = st.number_input("Batch size", min_value=1, key="config_batch_size")
+        negative_sample_size = st.number_input("Negative sample size", min_value=1, key="config_negative_sample_size")
+        hidden_dim = st.number_input("Hidden dimension", min_value=1, key="config_hidden_dim")
+        gamma = st.number_input("Gamma", key="config_gamma")
         adversarial_temperature = st.number_input(
-            "Adversarial temperature", value=float(defaults.get("adversarial_temperature", 0.5)), format="%.4f"
+            "Adversarial temperature", key="config_adversarial_temperature", format="%.4f"
         )
         learning_rate = st.number_input(
-            "Learning rate", value=float(defaults.get("learning_rate", 5e-5)), format="%.6f"
+            "Learning rate", key="config_learning_rate", format="%.6f"
         )
-        max_steps = st.number_input("Max training steps", min_value=1, value=int(defaults.get("max_steps", 80000)))
-        save_checkpoint_steps = st.number_input(
-            "Checkpoint interval", min_value=1, value=int(defaults.get("save_checkpoint_steps", 10000))
-        )
-        valid_steps = st.number_input("Validation interval", min_value=1, value=int(defaults.get("valid_steps", 10000)))
-        log_steps = st.number_input("Log interval", min_value=1, value=int(defaults.get("log_steps", 100)))
-        test_batch_size = st.number_input(
-            "Test batch size", min_value=1, value=int(defaults.get("test_batch_size", 8))
-        )
-        valid_batch_size = st.number_input(
-            "Validation batch size", min_value=1, value=int(defaults.get("valid_batch_size", 5))
-        )
-        cpu_num = st.number_input("CPU workers", min_value=1, value=int(defaults.get("cpu_num", 16)))
+        max_steps = st.number_input("Max training steps", min_value=1, key="config_max_steps")
+        save_checkpoint_steps = st.number_input("Checkpoint interval", min_value=1, key="config_save_checkpoint_steps")
+        valid_steps = st.number_input("Validation interval", min_value=1, key="config_valid_steps")
+        log_steps = st.number_input("Log interval", min_value=1, key="config_log_steps")
+        test_batch_size = st.number_input("Test batch size", min_value=1, key="config_test_batch_size")
+        valid_batch_size = st.number_input("Validation batch size", min_value=1, key="config_valid_batch_size")
+        cpu_num = st.number_input("CPU workers", min_value=1, key="config_cpu_num")
         regularization = st.number_input(
-            "Regularization (L3)", min_value=0.0, value=float(defaults.get("regularization", 0.0)), format="%.6f"
+            "Regularization (L3)", min_value=0.0, key="config_regularization", format="%.6f"
         )
 
     with st.expander("KGEC hyperparameters", expanded=False):
-        num_bins = st.number_input("Number of bins", min_value=1, value=int(defaults.get("KGEC_num_bins", 10)))
+        num_bins = st.number_input("Number of bins", min_value=1, key="config_KGEC_num_bins")
         kgec_lr = st.number_input(
-            "KGEC learning rate", min_value=1e-6, value=float(defaults.get("KGEC_learning_rate", 0.01)), format="%.6f"
+            "KGEC learning rate", min_value=1e-6, key="config_KGEC_learning_rate", format="%.6f"
         )
         initial_temperature = st.number_input(
-            "Initial temperature", value=float(defaults.get("KGEC_initial_temperature", 1.0)), format="%.4f"
+            "Initial temperature", key="config_KGEC_initial_temperature", format="%.4f"
         )
 
     run_button = st.button("Run KGEC pipeline")
@@ -452,6 +574,7 @@ if run_button:
         "data_path": data_path,
         "save_path": save_path or init_checkpoint,
         "init_checkpoint": init_checkpoint,
+        "model": model_name,
         "do_train": do_train,
         "do_valid": do_valid,
         "do_test": do_test,
@@ -478,15 +601,15 @@ if run_button:
     }
 
     if not args_updates["save_path"]:
-        args_updates["save_path"] = defaults.get("save_path") or defaults.get("init_checkpoint")
+        args_updates["save_path"] = derived_defaults.get("save_path") or derived_defaults.get("init_checkpoint")
     if not args_updates["init_checkpoint"]:
-        args_updates["init_checkpoint"] = defaults.get("init_checkpoint")
+        args_updates["init_checkpoint"] = derived_defaults.get("init_checkpoint")
 
-    args_updates.setdefault("double_entity_embedding", defaults.get("double_entity_embedding", False))
-    args_updates.setdefault("double_relation_embedding", defaults.get("double_relation_embedding", False))
-    args_updates.setdefault("negative_adversarial_sampling", defaults.get("negative_adversarial_sampling", True))
-    args_updates.setdefault("uni_weight", defaults.get("uni_weight", True))
-    args_updates.setdefault("test_log_steps", defaults.get("test_log_steps", 1000))
+    args_updates.setdefault("double_entity_embedding", derived_defaults.get("double_entity_embedding", False))
+    args_updates.setdefault("double_relation_embedding", derived_defaults.get("double_relation_embedding", False))
+    args_updates.setdefault("negative_adversarial_sampling", derived_defaults.get("negative_adversarial_sampling", True))
+    args_updates.setdefault("uni_weight", derived_defaults.get("uni_weight", True))
+    args_updates.setdefault("test_log_steps", derived_defaults.get("test_log_steps", 1000))
 
     with st.spinner("Executing KGEC pipeline. This may take a while depending on the configuration..."):
         try:
