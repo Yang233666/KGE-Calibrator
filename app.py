@@ -14,7 +14,10 @@ import importlib.util
 import io
 import logging
 import os
+import shutil
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping
@@ -42,6 +45,49 @@ st.set_page_config(page_title="KGE Calibrator Demo", layout="wide")
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+
+def _ensure_session_directory() -> Path:
+    """Return a unique temporary directory for the current Streamlit session."""
+
+    session_key = "kge_session_dir"
+    if session_key not in st.session_state:
+        temp_dir = Path(tempfile.mkdtemp(prefix="kge_calibrator_"))
+        st.session_state[session_key] = str(temp_dir)
+    return Path(st.session_state[session_key])
+
+
+def _extract_uploaded_archive(upload: "st.runtime.uploaded_file_manager.UploadedFile", label: str) -> Path:
+    """Persist ``upload`` to disk and extract it into a dedicated subdirectory."""
+
+    session_dir = _ensure_session_directory()
+    target_root = session_dir / label
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    archive_path = target_root.with_suffix(".zip")
+    with archive_path.open("wb") as fout:
+        fout.write(upload.getbuffer())
+
+    with zipfile.ZipFile(archive_path) as zf:
+        zf.extractall(target_root)
+
+    # Some archives wrap the contents in a top-level directory. If exactly one
+    # directory was extracted, treat it as the dataset/checkpoint root.
+    children = [child for child in target_root.iterdir() if child.is_dir() and child.name != "__MACOSX"]
+    files = [child for child in target_root.iterdir() if child.is_file()]
+    if len(children) == 1 and not files:
+        target_root = children[0]
+
+    return target_root
+
+
+def _default_output_directory() -> str:
+    session_dir = _ensure_session_directory()
+    output_dir = session_dir / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return str(output_dir)
 
 
 MAIN_SCRIPTS: Mapping[str, str] = {
@@ -380,9 +426,31 @@ with st.sidebar:
         st.error(str(exc))
         st.stop()
 
-    data_path = st.text_input("Data path", value=str(defaults.get("data_path", "")))
-    save_path = st.text_input("Model save path", value=str(defaults.get("save_path", "")))
-    init_checkpoint = st.text_input("Initial checkpoint", value=str(defaults.get("init_checkpoint", "")))
+    st.subheader("Inputs")
+
+    dataset_upload = st.file_uploader("Upload dataset archive (.zip)", type=["zip"], key="dataset_upload")
+    if dataset_upload is not None:
+        dataset_path = _extract_uploaded_archive(dataset_upload, "dataset")
+        st.session_state["data_path"] = str(dataset_path)
+        st.success("Dataset uploaded successfully.")
+
+    checkpoint_upload = st.file_uploader(
+        "Upload trained checkpoint (.zip)", type=["zip"], key="checkpoint_upload"
+    )
+    if checkpoint_upload is not None:
+        checkpoint_path = _extract_uploaded_archive(checkpoint_upload, "checkpoint")
+        st.session_state["init_checkpoint"] = str(checkpoint_path)
+        st.success("Checkpoint uploaded successfully.")
+
+    data_path = st.session_state.get("data_path", "")
+    init_checkpoint = st.session_state.get("init_checkpoint", "")
+    save_path = _default_output_directory()
+
+    if data_path:
+        st.caption(f"Dataset extracted to: `{data_path}`")
+    if init_checkpoint:
+        st.caption(f"Checkpoint extracted to: `{init_checkpoint}`")
+    st.caption(f"Model outputs will be stored in: `{save_path}`")
 
     do_train = st.checkbox("Train KG model", value=bool(defaults.get("do_train", True)))
     do_valid = st.checkbox("Run validation", value=bool(defaults.get("do_valid", True)))
@@ -439,11 +507,11 @@ with st.sidebar:
 
 if run_button:
     if not data_path:
-        st.error("A data path must be specified.")
+        st.error("Please upload a dataset archive before running the pipeline.")
         st.stop()
 
-    if do_train and not save_path:
-        st.error("Please provide a model save path when training is enabled.")
+    if not init_checkpoint:
+        st.error("Please upload a trained checkpoint archive before running the pipeline.")
         st.stop()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices or "3"
