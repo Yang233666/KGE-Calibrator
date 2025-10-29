@@ -12,6 +12,7 @@ from __future__ import annotations
 import gc
 import importlib.util
 import io
+import json
 import logging
 import os
 import shutil
@@ -83,6 +84,17 @@ def _extract_uploaded_archive(upload: "st.runtime.uploaded_file_manager.Uploaded
     return target_root
 
 
+def _persist_uploaded_file(upload: "st.runtime.uploaded_file_manager.UploadedFile", filename: str) -> Path:
+    """Persist an uploaded file into the session directory."""
+
+    session_dir = _ensure_session_directory()
+    target_path = session_dir / filename
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with target_path.open("wb") as fout:
+        fout.write(upload.getbuffer())
+    return target_path
+
+
 def _default_output_directory() -> str:
     session_dir = _ensure_session_directory()
     output_dir = session_dir / "outputs"
@@ -148,6 +160,29 @@ class PipelineResult:
     log_text: str
 
 
+def _apply_config_overrides_from_file(args_namespace, config_path: Path) -> None:
+    """Apply configuration overrides from ``config.json`` when no checkpoint is available."""
+
+    if not config_path.exists():
+        raise ValueError(f"Configuration file not found at {config_path}.")
+
+    with config_path.open() as fjson:
+        argparse_dict = json.load(fjson)
+
+    if not getattr(args_namespace, "data_path", None):
+        args_namespace.data_path = argparse_dict.get("data_path")
+
+    for key in (
+        "model",
+        "double_entity_embedding",
+        "double_relation_embedding",
+        "hidden_dim",
+        "test_batch_size",
+    ):
+        if key in argparse_dict:
+            setattr(args_namespace, key, argparse_dict[key])
+
+
 def execute_pipeline(module, args_dict: Mapping[str, object]) -> PipelineResult:
     """Execute the original training & calibration loop using ``args_dict``."""
 
@@ -158,8 +193,14 @@ def execute_pipeline(module, args_dict: Mapping[str, object]) -> PipelineResult:
     if not (args_namespace.do_train or args_namespace.do_valid or args_namespace.do_test):
         raise ValueError("At least one of training, validation, or testing must be enabled.")
 
+    config_path_value = getattr(args_namespace, "config_path", None)
+    entity_embedding_path_value = getattr(args_namespace, "entity_embedding_path", None)
+    relation_embedding_path_value = getattr(args_namespace, "relation_embedding_path", None)
+
     if getattr(args_namespace, "init_checkpoint", None):
         module.override_config(args_namespace)
+    elif config_path_value:
+        _apply_config_overrides_from_file(args_namespace, Path(config_path_value))
     elif args_namespace.data_path is None:
         raise ValueError("Either an initial checkpoint or a data path must be provided.")
 
@@ -213,9 +254,11 @@ def execute_pipeline(module, args_dict: Mapping[str, object]) -> PipelineResult:
         )
 
         if args_namespace.cuda and torch.cuda.is_available():
-            kge_model = kge_model.to(torch.device(args_namespace.cuda_device))
+            device = torch.device(args_namespace.cuda_device)
+            kge_model = kge_model.to(device)
         else:
             args_namespace.cuda = False
+            device = torch.device("cpu")
 
         if args_namespace.do_train:
             train_dataloader_head = DataLoader(
@@ -264,6 +307,35 @@ def execute_pipeline(module, args_dict: Mapping[str, object]) -> PipelineResult:
                 current_learning_rate = checkpoint["current_learning_rate"]
                 warm_up_steps = checkpoint["warm_up_steps"]
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        elif entity_embedding_path_value and relation_embedding_path_value:
+            entity_embedding_path = Path(entity_embedding_path_value)
+            relation_embedding_path = Path(relation_embedding_path_value)
+            entity_array = np.load(entity_embedding_path)
+            relation_array = np.load(relation_embedding_path)
+
+            if tuple(entity_array.shape) != tuple(kge_model.entity_embedding.shape):
+                raise ValueError(
+                    "Entity embedding shape %s does not match model expectations %s."
+                    % (entity_array.shape, tuple(kge_model.entity_embedding.shape))
+                )
+            if tuple(relation_array.shape) != tuple(kge_model.relation_embedding.shape):
+                raise ValueError(
+                    "Relation embedding shape %s does not match model expectations %s."
+                    % (relation_array.shape, tuple(kge_model.relation_embedding.shape))
+                )
+
+            entity_tensor = torch.from_numpy(entity_array).to(
+                device=device,
+                dtype=kge_model.entity_embedding.dtype,
+            )
+            relation_tensor = torch.from_numpy(relation_array).to(
+                device=device,
+                dtype=kge_model.relation_embedding.dtype,
+            )
+
+            kge_model.entity_embedding.data.copy_(entity_tensor)
+            kge_model.relation_embedding.data.copy_(relation_tensor)
+            init_step = 0
         else:
             init_step = 0
 
@@ -434,6 +506,28 @@ with st.sidebar:
         st.session_state["data_path"] = str(dataset_path)
         st.success("Dataset uploaded successfully.")
 
+    config_upload = st.file_uploader("Upload config.json", type=["json"], key="config_upload")
+    if config_upload is not None:
+        config_path = _persist_uploaded_file(config_upload, "config.json")
+        st.session_state["config_path"] = str(config_path)
+        st.success("Configuration uploaded successfully.")
+
+    entity_embedding_upload = st.file_uploader(
+        "Upload entity embedding (.npy)", type=["npy"], key="entity_embedding_upload"
+    )
+    if entity_embedding_upload is not None:
+        entity_embedding_path = _persist_uploaded_file(entity_embedding_upload, "entity_embedding.npy")
+        st.session_state["entity_embedding_path"] = str(entity_embedding_path)
+        st.success("Entity embedding uploaded successfully.")
+
+    relation_embedding_upload = st.file_uploader(
+        "Upload relation embedding (.npy)", type=["npy"], key="relation_embedding_upload"
+    )
+    if relation_embedding_upload is not None:
+        relation_embedding_path = _persist_uploaded_file(relation_embedding_upload, "relation_embedding.npy")
+        st.session_state["relation_embedding_path"] = str(relation_embedding_path)
+        st.success("Relation embedding uploaded successfully.")
+
     checkpoint_upload = st.file_uploader(
         "Upload trained checkpoint (.zip)", type=["zip"], key="checkpoint_upload"
     )
@@ -444,12 +538,21 @@ with st.sidebar:
 
     data_path = st.session_state.get("data_path", "")
     init_checkpoint = st.session_state.get("init_checkpoint", "")
+    config_path = st.session_state.get("config_path", "")
+    entity_embedding_path = st.session_state.get("entity_embedding_path", "")
+    relation_embedding_path = st.session_state.get("relation_embedding_path", "")
     save_path = _default_output_directory()
 
     if data_path:
         st.caption(f"Dataset extracted to: `{data_path}`")
     if init_checkpoint:
         st.caption(f"Checkpoint extracted to: `{init_checkpoint}`")
+    if config_path:
+        st.caption(f"Configuration stored at: `{config_path}`")
+    if entity_embedding_path:
+        st.caption(f"Entity embedding stored at: `{entity_embedding_path}`")
+    if relation_embedding_path:
+        st.caption(f"Relation embedding stored at: `{relation_embedding_path}`")
     st.caption(f"Model outputs will be stored in: `{save_path}`")
 
     do_train = st.checkbox("Train KG model", value=bool(defaults.get("do_train", True)))
@@ -510,8 +613,28 @@ if run_button:
         st.error("Please upload a dataset archive before running the pipeline.")
         st.stop()
 
-    if not init_checkpoint:
-        st.error("Please upload a trained checkpoint archive before running the pipeline.")
+    has_checkpoint = bool(init_checkpoint)
+    has_config_bundle = bool(config_path and entity_embedding_path and relation_embedding_path)
+
+    if not has_checkpoint and not has_config_bundle and not do_train:
+        missing_inputs = []
+        if not config_path:
+            missing_inputs.append("config.json")
+        if not entity_embedding_path:
+            missing_inputs.append("entity embedding")
+        if not relation_embedding_path:
+            missing_inputs.append("relation embedding")
+
+        if missing_inputs:
+            missing_desc = ", ".join(missing_inputs)
+            st.error(
+                "Please upload either a trained checkpoint or provide the following files before running the pipeline: "
+                f"{missing_desc}."
+            )
+        else:
+            st.error(
+                "Please upload either a trained checkpoint or provide config and embedding files before running the pipeline."
+            )
         st.stop()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices or "3"
@@ -520,6 +643,9 @@ if run_button:
         "data_path": data_path,
         "save_path": save_path or init_checkpoint,
         "init_checkpoint": init_checkpoint,
+        "config_path": config_path or None,
+        "entity_embedding_path": entity_embedding_path or None,
+        "relation_embedding_path": relation_embedding_path or None,
         "do_train": do_train,
         "do_valid": do_valid,
         "do_test": do_test,
