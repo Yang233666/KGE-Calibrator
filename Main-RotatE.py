@@ -32,9 +32,9 @@ def parse_args(args=None):
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
-	parser.add_argument('--data_path', type=str, default='../data/wn18')
-	parser.add_argument('-save', '--save_path', default='../models/RotatE_wn18', type=str)
-	parser.add_argument('-init', '--init_checkpoint', default='../models/RotatE_wn18', type=str)
+	parser.add_argument('--data_path', type=str, default='../data/wn18rr')
+	parser.add_argument('-save', '--save_path', default='../models/RotatE_wn18rr', type=str)
+	parser.add_argument('-init', '--init_checkpoint', default='../models/RotatE_wn18rr', type=str)
 	parser.add_argument('-test_log_name', '--test_log_name', default='ONLY-TEST.log', type=str)
 	parser.add_argument('--model', default='RotatE', type=str)
 	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=True)

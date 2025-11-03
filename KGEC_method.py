@@ -2,7 +2,7 @@ from typing import Literal, Optional, Union
 import torch
 from torch import Tensor, nn
 from abc import ABC, abstractmethod
-from .calutils import expit_probs_x, expit_probs_binary, convert_to_tensor
+from calutils import expit_probs_x, expit_probs_binary, convert_to_tensor
 import torch.optim as optim
 
 Only_Use_CPU = True

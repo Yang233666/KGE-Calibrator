@@ -428,8 +428,8 @@ class KGEModel(nn.Module):
         # Jump Selection Strategy
         from scipy.stats import entropy
         # Compute softmax and sort scores
-        all_model_score = all_model_score.softmax(-1).cpu()
-        sorted_all_model_score = torch.sort(all_model_score, dim=1, descending=True)[0]
+        softmax_all_model_score = all_model_score.softmax(-1).cpu()
+        sorted_all_model_score = torch.sort(softmax_all_model_score, dim=1, descending=True)[0]
 
         # Vectorized KL divergence computation
         kl_divergences = np.array([

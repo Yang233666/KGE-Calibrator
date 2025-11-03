@@ -33,9 +33,9 @@ def parse_args(args=None):
 	parser.add_argument('--do_test', action='store_true', default=True)
 	parser.add_argument('--evaluate_train', action='store_true', help='Evaluate on training data',
 	                    default=False)
-	parser.add_argument('--data_path', type=str, default='../data/wn18')
-	parser.add_argument('-save', '--save_path', default='../models/TransE_wn18', type=str)
-	parser.add_argument('-init', '--init_checkpoint', default='../models/TransE_wn18', type=str)
+	parser.add_argument('--data_path', type=str, default='../data/FB15k')
+	parser.add_argument('-save', '--save_path', default='../models/TransE_FB15k', type=str)
+	parser.add_argument('-init', '--init_checkpoint', default='../models/TransE_FB15k', type=str)
 	parser.add_argument('--model', default='TransE', type=str)
 	parser.add_argument('-de', '--double_entity_embedding', action='store_true', default=False)
 	parser.add_argument('-dr', '--double_relation_embedding', action='store_true', default=False)
